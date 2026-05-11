@@ -12,6 +12,9 @@ def _compute_d1_d2(S, K, T, t, r, sigma):
         return d1, d2
 
 def bs_price(S, K, T, r, sigma, flag, t=0):
+    if flag not in ("call", "put"):
+            raise ValueError(f"flag must be 'call' or 'put', got '{flag}'")
+    
     if t >= T:                                                          
         if flag == "call" : 
             return np.maximum(S - K, 0)                                   
@@ -29,3 +32,34 @@ def bs_price(S, K, T, r, sigma, flag, t=0):
         return C
     if flag == "put":
         return P
+    
+def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
+    tolerance = 1e-4
+    interval = sigma_high - sigma_low
+
+    bs_low = bs_price(S, K, T, r, sigma_low, flag)
+    bs_high = bs_price(S, K, T, r, sigma_high, flag)
+
+    if (bs_low - price) * (bs_high - price) >= 0:
+        raise ValueError(f"price {price} is outside no-arbitrage bounds")
+    
+    while interval >= tolerance:
+        sigma_mid = (sigma_low + sigma_high) / 2
+        bs_mid = bs_price(S, K, T, r, sigma_mid, flag)
+
+        if bs_mid == price:
+            return sigma_mid
+        
+        if (bs_low - price) * (bs_mid - price) < 0:
+            # root is in left half
+            sigma_high = sigma_mid
+            bs_high = bs_mid
+
+        else:
+            # root is in right half
+            sigma_low = sigma_mid
+            bs_low = bs_mid
+
+        interval = sigma_high - sigma_low
+
+    return (sigma_low + sigma_high) / 2
