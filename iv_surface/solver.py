@@ -32,6 +32,21 @@ def bs_price(S, K, T, r, sigma, flag, t=0):
         return C
     if flag == "put":
         return P
+
+def _vega_compute(S, sigma, T, K, r, t=0):
+    if t >= T:
+        return 0
+    d1, _ = _compute_d1_d2(S, K, T, t, r, sigma)
+    vega = S * norm.pdf(d1) * np.sqrt(T - t)
+    return vega
+
+def _newton_step(sigma, S, K, T, r, price, flag):
+    f_sigma = bs_price(S, K, T, r, sigma, flag) - price
+    f_diff_sigma = _vega_compute(S, sigma, T, K, r)
+    if f_diff_sigma < 1e-8:
+        return -1
+    sigma_next = sigma - f_sigma / f_diff_sigma
+    return sigma_next
     
 def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     tolerance = 1e-4
@@ -43,8 +58,14 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     if (bs_low - price) * (bs_high - price) >= 0:
         raise ValueError(f"price {price} is outside no-arbitrage bounds")
     
+    sigma_mid = (sigma_low + sigma_high) / 2
     while interval >= tolerance:
-        sigma_mid = (sigma_low + sigma_high) / 2
+        sigma_nr = _newton_step(sigma_mid, S, K, T, r, price, flag)
+        if (sigma_nr >= sigma_low) and (sigma_nr <= sigma_high):
+            sigma_mid = sigma_nr
+        else:
+            sigma_mid = (sigma_low + sigma_high) / 2
+
         bs_mid = bs_price(S, K, T, r, sigma_mid, flag)
 
         if bs_mid == price:
