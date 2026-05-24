@@ -84,3 +84,15 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
         interval = sigma_high - sigma_low
 
     return (sigma_low + sigma_high) / 2
+
+def build_surface(prices, S, strikes, expiries, r=0, flag="call"):
+    # prices: 2D array shape (n_expiries, n_strikes)
+    # returns: 2D array same shape, IV at each (expiry, strike)
+    surface = np.full((len(expiries), len(strikes)), np.nan)
+    for i, T in enumerate(expiries):
+        for j, K in enumerate(strikes):
+            try:
+                surface[i, j] = solve_iv(prices[i, j], S, K, T, r, flag)
+            except ValueError:
+                pass
+    return surface
