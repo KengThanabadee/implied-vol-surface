@@ -4,6 +4,8 @@ from scipy.stats import norm
 def _compute_d1_d2(S, K, T, t, r, sigma):
         if np.any(S <= 0):
             raise ValueError(f"S must be > 0, got {S}")
+        if np.any(K <= 0):
+            raise ValueError(f"K must be > 0, got {K}")
         if np.any(sigma <= 0):
             raise ValueError(f"sigma must be > 0, got {sigma}")
         tau = np.maximum(T - t, 1e-12)
@@ -51,7 +53,8 @@ def _newton_step(sigma, S, K, T, r, price, flag):
 def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     tolerance = 1e-4
     interval = sigma_high - sigma_low
-
+    if np.isnan(price):
+        raise ValueError(f"price must be a finite number, got {price}")
     bs_low = bs_price(S, K, T, r, sigma_low, flag)
     bs_high = bs_price(S, K, T, r, sigma_high, flag)
 
@@ -61,6 +64,9 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     sigma_mid = (sigma_low + sigma_high) / 2
     while interval >= tolerance:
         sigma_nr = _newton_step(sigma_mid, S, K, T, r, price, flag)
+        if sigma_nr != -1 and abs(sigma_nr - sigma_mid) < tolerance:
+            return sigma_nr 
+        
         if (sigma_nr >= sigma_low) and (sigma_nr <= sigma_high):
             sigma_mid = sigma_nr
         else:
