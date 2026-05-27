@@ -58,7 +58,7 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     bs_low = bs_price(S, K, T, r, sigma_low, flag)
     bs_high = bs_price(S, K, T, r, sigma_high, flag)
 
-    if (bs_low - price) * (bs_high - price) >= 0:
+    if (bs_low - price) * (bs_high - price) > 0:
         raise ValueError(f"price {price} is outside no-arbitrage bounds")
     
     sigma_mid = (sigma_low + sigma_high) / 2
@@ -74,7 +74,7 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
 
         bs_mid = bs_price(S, K, T, r, sigma_mid, flag)
 
-        if bs_mid == price:
+        if abs(bs_mid - price) < tolerance:
             return sigma_mid
         
         if (bs_low - price) * (bs_mid - price) < 0:
