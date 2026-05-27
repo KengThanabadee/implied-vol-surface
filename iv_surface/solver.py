@@ -1,3 +1,4 @@
+import bisect
 import numpy as np
 from scipy.stats import norm
 
@@ -102,3 +103,27 @@ def build_surface(prices, S, strikes, expiries, r=0, flag="call"):
             except ValueError:
                 pass
     return surface
+
+def interpolate_iv(surface, strikes, expiries, K, T):
+    # Step 1: validate K and T are inside the grid
+    if T < expiries[0] or T > expiries[-1]:
+        raise ValueError(f"T is outside the bound")
+    if K < strikes[0] or K > strikes[-1]:
+        raise ValueError(f"K is outside the bound")
+   
+    # Step 2: find bracketing indices for K and T
+    i_high = bisect.bisect_right(expiries, T)
+    i_low = i_high - 1
+
+    j_high = bisect.bisect_right(strikes, K)
+    j_low = j_high - 1
+
+    # Step 3: compute weights
+    w_T = (T - expiries[i_low]) / (expiries[i_high] - expiries[i_low])
+    w_K = (K - strikes[j_low]) / (strikes[j_high] - strikes[j_low])
+    
+    # Step 4: interpolate along K at T_low and T_high, then interpolate along T
+    iv_at_T_low = surface[i_low, j_low] + (surface[i_low, j_high] - surface[i_low, j_low]) * w_K
+    iv_at_T_high = surface[i_high, j_low] + (surface[i_high, j_high] - surface[i_high, j_low]) * w_K
+
+    return iv_at_T_low + (iv_at_T_high - iv_at_T_low) * w_T
