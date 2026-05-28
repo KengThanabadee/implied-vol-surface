@@ -109,6 +109,10 @@ def build_surface(prices, S, strikes, expiries, r=0, flag="call"):
     return surface
 
 def interpolate_iv(surface, strikes, expiries, K, T):
+    expected_shape = (len(expiries), len(strikes))
+    if surface.shape != expected_shape:
+        raise ValueError(f"surface shape must be {expected_shape}, got {surface.shape}")
+
     # Step 1: validate K and T are inside the grid
     if T < expiries[0] or T > expiries[-1]:
         raise ValueError(f"T is outside the bound")

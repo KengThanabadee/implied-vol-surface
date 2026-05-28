@@ -93,6 +93,14 @@ def test_interpolate_iv_out_of_bounds():
     with pytest.raises(ValueError):
         interpolate_iv(surface, strikes, expiries, K=100, T=0.05)
 
+def test_interpolate_iv_wrong_surface_shape():
+    strikes = [90, 100, 110]
+    expiries = [0.1, 0.25, 0.5]
+    surface = np.full((2, 3), 0.2)
+
+    with pytest.raises(ValueError):
+        interpolate_iv(surface, strikes, expiries, K=100, T=0.25)
+
 def test_interpolate_iv_exact_grid_point():
     strikes = [90, 100, 110]
     expiries = [0.1, 0.25, 0.5]
