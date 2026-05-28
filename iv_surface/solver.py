@@ -54,7 +54,7 @@ def _newton_step(sigma, S, K, T, r, price, flag):
 def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     tolerance = 1e-4
     interval = sigma_high - sigma_low
-    if np.isnan(price):
+    if not np.isfinite(price):
         raise ValueError(f"price must be a finite number, got {price}")
     bs_low = bs_price(S, K, T, r, sigma_low, flag)
     bs_high = bs_price(S, K, T, r, sigma_high, flag)
@@ -95,6 +95,10 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
 def build_surface(prices, S, strikes, expiries, r=0, flag="call"):
     # prices: 2D array shape (n_expiries, n_strikes)
     # returns: 2D array same shape, IV at each (expiry, strike)
+    expected_shape = (len(expiries), len(strikes))
+    if prices.shape != expected_shape:
+        raise ValueError(f"prices shape must be {expected_shape}, got {prices.shape}")
+
     surface = np.full((len(expiries), len(strikes)), np.nan)
     for i, T in enumerate(expiries):
         for j, K in enumerate(strikes):
@@ -113,9 +117,11 @@ def interpolate_iv(surface, strikes, expiries, K, T):
    
     # Step 2: find bracketing indices for K and T
     i_high = bisect.bisect_right(expiries, T)
+    i_high = min(i_high, len(expiries) - 1)
     i_low = i_high - 1
 
     j_high = bisect.bisect_right(strikes, K)
+    j_high = min(j_high, len(strikes) - 1)
     j_low = j_high - 1
 
     # Step 3: compute weights
