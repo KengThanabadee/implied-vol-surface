@@ -28,6 +28,48 @@ def test_solve_iv_rejects_non_finite_price():
     with pytest.raises(ValueError):
         solve_iv(np.nan, 100, 100, 1, 0.03, "call")
 
+def test_solve_iv_returns_lower_bracket_endpoint():
+    S = 100
+    K = 100
+    T = 1
+    r = 0.03
+    sigma_low = 1e-6
+    flag = "call"
+
+    price = bs_price(S, K, T, r, sigma_low, flag)
+    implied_vol = solve_iv(price, S, K, T, r, flag)
+
+    assert abs(implied_vol - sigma_low) < 1e-4
+
+def test_solve_iv_returns_upper_bracket_endpoint():
+    S = 100
+    K = 100
+    T = 1
+    r = 0.03
+    sigma_high = 10.0
+    flag = "call"
+
+    price = bs_price(S, K, T, r, sigma_high, flag)
+    implied_vol = solve_iv(price, S, K, T, r, flag)
+
+    assert abs(implied_vol - sigma_high) < 1e-4
+
+def test_solve_iv_rejects_expired_option():
+    with pytest.raises(ValueError):
+        solve_iv(0, 100, 100, 0, 0.03, "call")
+
+def test_solve_iv_rejects_non_finite_inputs():
+    cases = [
+        {"price": 10, "S": np.nan, "K": 100, "T": 1, "r": 0.03, "flag": "call"},
+        {"price": 10, "S": 100, "K": np.nan, "T": 1, "r": 0.03, "flag": "call"},
+        {"price": 10, "S": 100, "K": 100, "T": np.nan, "r": 0.03, "flag": "call"},
+        {"price": 10, "S": 100, "K": 100, "T": 1, "r": np.nan, "flag": "call"},
+    ]
+
+    for kwargs in cases:
+        with pytest.raises(ValueError):
+            solve_iv(**kwargs)
+
 def test_build_surface_round_trip():
     strikes = [90, 100, 110]
     expiries = [0.1, 0.25, 0.5]
@@ -100,6 +142,22 @@ def test_interpolate_iv_wrong_surface_shape():
 
     with pytest.raises(ValueError):
         interpolate_iv(surface, strikes, expiries, K=100, T=0.25)
+
+def test_interpolate_iv_rejects_singleton_grid_dimension():
+    with pytest.raises(ValueError):
+        interpolate_iv(np.array([[0.2, 0.3]]), [100, 110], [1], K=105, T=1)
+
+    with pytest.raises(ValueError):
+        interpolate_iv(np.array([[0.2], [0.3]]), [100], [1, 2], K=100, T=1.5)
+
+def test_interpolate_iv_rejects_unsorted_or_duplicate_grid():
+    surface = np.full((3, 3), 0.2)
+
+    with pytest.raises(ValueError):
+        interpolate_iv(surface, [90, 110, 100], [0.1, 0.25, 0.5], K=100, T=0.25)
+
+    with pytest.raises(ValueError):
+        interpolate_iv(surface, [90, 100, 110], [0.1, 0.25, 0.25], K=100, T=0.25)
 
 def test_interpolate_iv_exact_grid_point():
     strikes = [90, 100, 110]

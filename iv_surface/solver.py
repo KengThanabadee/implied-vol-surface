@@ -2,7 +2,15 @@ import bisect
 import numpy as np
 from scipy.stats import norm
 
+
+def _is_strictly_increasing(values):
+    return all(values[i] < values[i + 1] for i in range(len(values) - 1))
+
+
 def _compute_d1_d2(S, K, T, t, r, sigma):
+        for name, value in {"S": S, "K": K, "T": T, "t": t, "r": r, "sigma": sigma}.items():
+            if not np.all(np.isfinite(value)):
+                raise ValueError(f"{name} must be finite, got {value}")
         if np.any(S <= 0):
             raise ValueError(f"S must be > 0, got {S}")
         if np.any(K <= 0):
@@ -53,11 +61,31 @@ def _newton_step(sigma, S, K, T, r, price, flag):
     
 def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     tolerance = 1e-4
+    for name, value in {
+        "price": price,
+        "S": S,
+        "K": K,
+        "T": T,
+        "r": r,
+        "sigma_low": sigma_low,
+        "sigma_high": sigma_high,
+    }.items():
+        if not np.all(np.isfinite(value)):
+            raise ValueError(f"{name} must be finite, got {value}")
+    if T <= 0:
+        raise ValueError(f"T must be > 0 for implied volatility, got {T}")
+    if sigma_low <= 0 or sigma_high <= 0:
+        raise ValueError("sigma bounds must be > 0")
+    if sigma_low >= sigma_high:
+        raise ValueError("sigma_low must be less than sigma_high")
     interval = sigma_high - sigma_low
-    if not np.isfinite(price):
-        raise ValueError(f"price must be a finite number, got {price}")
     bs_low = bs_price(S, K, T, r, sigma_low, flag)
     bs_high = bs_price(S, K, T, r, sigma_high, flag)
+
+    if abs(bs_low - price) < tolerance:
+        return sigma_low
+    if abs(bs_high - price) < tolerance:
+        return sigma_high
 
     if (bs_low - price) * (bs_high - price) > 0:
         raise ValueError(f"price {price} is outside no-arbitrage bounds")
@@ -65,10 +93,10 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
     sigma_mid = (sigma_low + sigma_high) / 2
     while interval >= tolerance:
         sigma_nr = _newton_step(sigma_mid, S, K, T, r, price, flag)
-        if sigma_nr != -1 and abs(sigma_nr - sigma_mid) < tolerance:
+        if sigma_nr != -1 and np.isfinite(sigma_nr) and abs(sigma_nr - sigma_mid) < tolerance:
             return sigma_nr 
         
-        if (sigma_nr >= sigma_low) and (sigma_nr <= sigma_high):
+        if np.isfinite(sigma_nr) and (sigma_nr >= sigma_low) and (sigma_nr <= sigma_high):
             sigma_mid = sigma_nr
         else:
             sigma_mid = (sigma_low + sigma_high) / 2
@@ -112,6 +140,12 @@ def interpolate_iv(surface, strikes, expiries, K, T):
     expected_shape = (len(expiries), len(strikes))
     if surface.shape != expected_shape:
         raise ValueError(f"surface shape must be {expected_shape}, got {surface.shape}")
+    if len(expiries) < 2 or len(strikes) < 2:
+        raise ValueError("bilinear interpolation requires at least two expiries and two strikes")
+    if not _is_strictly_increasing(expiries):
+        raise ValueError("expiries must be strictly increasing")
+    if not _is_strictly_increasing(strikes):
+        raise ValueError("strikes must be strictly increasing")
 
     # Step 1: validate K and T are inside the grid
     if T < expiries[0] or T > expiries[-1]:
