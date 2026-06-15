@@ -16,7 +16,7 @@ This is an early local package in a personal quant-library ecosystem. It is usef
 - Solves implied volatility with Newton-Raphson and bisection fallback.
 - Builds a 2D IV surface from a grid of option prices.
 - Interpolates IV inside an expiry/strike grid with bilinear interpolation.
-- Fetches and parses Bybit option-chain ticker data into a DataFrame.
+- Fetches and parses Bybit option-chain ticker data into a DataFrame, keeping market quotes separate from exchange mark values.
 
 ## Core Data Shape
 
@@ -98,7 +98,9 @@ Returns bilinearly interpolated IV at the target `(T, K)`. Raises `ValueError` i
 
 ### `fetch_chain(underlying="BTC")`
 
-Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFrame with parsed symbol fields, mark price, underlying price, and time to expiry.
+Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFrame with parsed symbol fields, bid/ask prices, bid/ask IVs, mid price, mark price, mark IV, underlying price, and time to expiry.
+
+`mid_price` is computed only from valid positive bid/ask quotes. If the bid/ask quote is not usable, `mid_price` is `NaN` and `quote_source` is `"none"`; the fetcher does not silently fall back to `mark_price`.
 
 ## Assumptions And Limitations
 
@@ -107,6 +109,7 @@ Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFra
 - No dividend yield parameter yet.
 - IV solving requires `T > 0`; implied volatility is undefined at expiry.
 - `build_surface` fills failed IV solves with `NaN`.
+- Market IV surfaces should be built from usable bid/ask mid prices; `mark_price` and `mark_iv` are kept for comparison.
 - Interpolation requires at least two strictly increasing expiries and strikes.
 - Interpolation is in-grid only; no extrapolation.
 - The surface is a raw interpolated grid, not an arbitrage-free fitted surface.

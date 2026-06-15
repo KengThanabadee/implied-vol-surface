@@ -16,6 +16,16 @@ def _to_float(value):
         return np.nan
 
 
+def _compute_mid_price(bid_price, ask_price):
+    if not np.isfinite(bid_price) or not np.isfinite(ask_price):
+        return np.nan
+    if bid_price <= 0 or ask_price <= 0:
+        return np.nan
+    if ask_price < bid_price:
+        return np.nan
+    return (bid_price + ask_price) / 2
+
+
 def parse_symbol(symbol: str) -> dict:
     """Parse a Bybit option symbol like BTC-27JUN25-100000-C into components."""
     parts = symbol.split("-")
@@ -67,8 +77,15 @@ def fetch_chain(underlying: str = "BTC") -> pd.DataFrame:
         except ValueError:
             continue
 
+        bid_price = _to_float(ticker.get("bid1Price"))
+        ask_price = _to_float(ticker.get("ask1Price"))
+        bid_iv = _to_float(ticker.get("bid1Iv"))
+        ask_iv = _to_float(ticker.get("ask1Iv"))
         mark_price = _to_float(ticker.get("markPrice"))
+        mark_iv = _to_float(ticker.get("markIv"))
         underlying_price = _to_float(ticker.get("underlyingPrice"))
+        mid_price = _compute_mid_price(bid_price, ask_price)
+        quote_source = "mid" if np.isfinite(mid_price) else "none"
         tau = compute_tau(parsed["expiry_dt"], now)
 
         rows.append(
@@ -78,7 +95,14 @@ def fetch_chain(underlying: str = "BTC") -> pd.DataFrame:
                 "expiry_dt": parsed["expiry_dt"],
                 "strike": parsed["strike"],
                 "flag": parsed["flag"],
+                "bid_price": bid_price,
+                "ask_price": ask_price,
+                "mid_price": mid_price,
+                "quote_source": quote_source,
+                "bid_iv": bid_iv,
+                "ask_iv": ask_iv,
                 "mark_price": mark_price,
+                "mark_iv": mark_iv,
                 "underlying_price": underlying_price,
                 "tau": tau,
             }

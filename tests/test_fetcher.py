@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-from iv_surface.fetcher import _to_float, compute_tau, parse_symbol
+from iv_surface import fetcher
+from iv_surface.fetcher import _compute_mid_price, _to_float, compute_tau, fetch_chain, parse_symbol
 
 
 def test_to_float_returns_nan_for_bad_values():
@@ -11,6 +12,14 @@ def test_to_float_returns_nan_for_bad_values():
     assert np.isnan(_to_float(None))
     assert np.isnan(_to_float("not-a-number"))
     assert np.isnan(_to_float(np.inf))
+
+
+def test_compute_mid_price_uses_valid_bid_ask_only():
+    assert _compute_mid_price(100, 110) == 105
+    assert np.isnan(_compute_mid_price(0, 110))
+    assert np.isnan(_compute_mid_price(100, 0))
+    assert np.isnan(_compute_mid_price(110, 100))
+    assert np.isnan(_compute_mid_price(np.nan, 110))
 
 
 def test_parse_symbol_call_and_put():
@@ -41,3 +50,82 @@ def test_compute_tau_one_year():
     expiry = datetime(2027, 1, 1, 6, tzinfo=timezone.utc)
 
     assert abs(compute_tau(expiry, now) - 1.0) < 1e-12
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_chain_uses_mid_price_as_quote_source(monkeypatch):
+    payload = {
+        "result": {
+            "list": [
+                {
+                    "symbol": "BTC-27JUN30-100000-C",
+                    "bid1Price": "100",
+                    "ask1Price": "120",
+                    "bid1Iv": "0.55",
+                    "ask1Iv": "0.65",
+                    "markPrice": "108",
+                    "markIv": "0.60",
+                    "underlyingPrice": "100000",
+                }
+            ]
+        }
+    }
+
+    def fake_get(url, params, timeout):
+        assert url == fetcher._BYBIT_TICKERS_URL
+        assert params == {"category": "option", "baseCoin": "BTC"}
+        assert timeout == 10
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+
+    df = fetch_chain("BTC")
+    row = df.iloc[0]
+
+    assert row["bid_price"] == 100
+    assert row["ask_price"] == 120
+    assert row["mid_price"] == 110
+    assert row["quote_source"] == "mid"
+    assert row["bid_iv"] == 0.55
+    assert row["ask_iv"] == 0.65
+    assert row["mark_price"] == 108
+    assert row["mark_iv"] == 0.60
+
+
+def test_fetch_chain_does_not_fallback_to_mark_price(monkeypatch):
+    payload = {
+        "result": {
+            "list": [
+                {
+                    "symbol": "BTC-27JUN30-100000-C",
+                    "bid1Price": "0",
+                    "ask1Price": "120",
+                    "markPrice": "108",
+                    "markIv": "0.60",
+                    "underlyingPrice": "100000",
+                }
+            ]
+        }
+    }
+
+    def fake_get(url, params, timeout):
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+
+    df = fetch_chain("BTC")
+    row = df.iloc[0]
+
+    assert np.isnan(row["mid_price"])
+    assert row["quote_source"] == "none"
+    assert row["mark_price"] == 108
