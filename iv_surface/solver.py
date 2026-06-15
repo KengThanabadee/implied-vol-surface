@@ -120,7 +120,7 @@ def solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0):
 
     return (sigma_low + sigma_high) / 2
 
-def build_surface(prices, S, strikes, expiries, r=0, flag="call"):
+def build_surface(prices, S, expiries, strikes, r=0, flag="call"):
     # prices: 2D array shape (n_expiries, n_strikes)
     # returns: 2D array same shape, IV at each (expiry, strike)
     expected_shape = (len(expiries), len(strikes))
@@ -136,7 +136,7 @@ def build_surface(prices, S, strikes, expiries, r=0, flag="call"):
                 pass
     return surface
 
-def interpolate_iv(surface, strikes, expiries, K, T):
+def interpolate_iv(surface, expiries, strikes, target_T, target_K):
     expected_shape = (len(expiries), len(strikes))
     if surface.shape != expected_shape:
         raise ValueError(f"surface shape must be {expected_shape}, got {surface.shape}")
@@ -147,24 +147,24 @@ def interpolate_iv(surface, strikes, expiries, K, T):
     if not _is_strictly_increasing(strikes):
         raise ValueError("strikes must be strictly increasing")
 
-    # Step 1: validate K and T are inside the grid
-    if T < expiries[0] or T > expiries[-1]:
-        raise ValueError(f"T is outside the bound")
-    if K < strikes[0] or K > strikes[-1]:
-        raise ValueError(f"K is outside the bound")
+    # Step 1: validate target point is inside the grid
+    if target_T < expiries[0] or target_T > expiries[-1]:
+        raise ValueError(f"target_T is outside the bound")
+    if target_K < strikes[0] or target_K > strikes[-1]:
+        raise ValueError(f"target_K is outside the bound")
    
-    # Step 2: find bracketing indices for K and T
-    i_high = bisect.bisect_right(expiries, T)
+    # Step 2: find bracketing indices for target_T and target_K
+    i_high = bisect.bisect_right(expiries, target_T)
     i_high = min(i_high, len(expiries) - 1)
     i_low = i_high - 1
 
-    j_high = bisect.bisect_right(strikes, K)
+    j_high = bisect.bisect_right(strikes, target_K)
     j_high = min(j_high, len(strikes) - 1)
     j_low = j_high - 1
 
     # Step 3: compute weights
-    w_T = (T - expiries[i_low]) / (expiries[i_high] - expiries[i_low])
-    w_K = (K - strikes[j_low]) / (strikes[j_high] - strikes[j_low])
+    w_T = (target_T - expiries[i_low]) / (expiries[i_high] - expiries[i_low])
+    w_K = (target_K - strikes[j_low]) / (strikes[j_high] - strikes[j_low])
     
     # Step 4: interpolate along K at T_low and T_high, then interpolate along T
     iv_at_T_low = surface[i_low, j_low] + (surface[i_low, j_high] - surface[i_low, j_low]) * w_K

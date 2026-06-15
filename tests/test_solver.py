@@ -82,7 +82,7 @@ def test_build_surface_round_trip():
         for T in expiries
     ])
 
-    surface = build_surface(prices, S, strikes, expiries, r)
+    surface = build_surface(prices, S, expiries, strikes, r)
 
     assert np.allclose(sigma, surface, atol=1e-4)
 
@@ -92,7 +92,7 @@ def test_build_surface_wrong_price_shape():
     prices = np.ones((2, 3))
 
     with pytest.raises(ValueError):
-        build_surface(prices, S=100, strikes=strikes, expiries=expiries)
+        build_surface(prices, S=100, expiries=expiries, strikes=strikes)
 
 def test_interpolate_iv_flat_surface_from_prices():
     strikes = [90, 100, 110]
@@ -105,10 +105,10 @@ def test_interpolate_iv_flat_surface_from_prices():
         [bs_price(S, K, T, r, sigma, "call") for K in strikes]
         for T in expiries
     ])
-    surface = build_surface(prices, S, strikes, expiries, r)
+    surface = build_surface(prices, S, expiries, strikes, r)
 
     # query a point strictly inside the grid
-    iv = interpolate_iv(surface, strikes, expiries, K=97, T=0.18)
+    iv = interpolate_iv(surface, expiries, strikes, target_T=0.18, target_K=97)
     assert abs(iv - sigma) < 1e-4
 
 def test_interpolate_iv_non_flat_surface():
@@ -120,7 +120,7 @@ def test_interpolate_iv_non_flat_surface():
         [0.20, 0.22, 0.24],
     ])
 
-    iv = interpolate_iv(surface, strikes, expiries, K=95, T=0.175)
+    iv = interpolate_iv(surface, expiries, strikes, target_T=0.175, target_K=95)
 
     assert abs(iv - 0.195) < 1e-4
 
@@ -130,10 +130,10 @@ def test_interpolate_iv_out_of_bounds():
     surface = np.full((3, 3), 0.2)
 
     with pytest.raises(ValueError):
-        interpolate_iv(surface, strikes, expiries, K=85, T=0.25)
+        interpolate_iv(surface, expiries, strikes, target_T=0.25, target_K=85)
 
     with pytest.raises(ValueError):
-        interpolate_iv(surface, strikes, expiries, K=100, T=0.05)
+        interpolate_iv(surface, expiries, strikes, target_T=0.05, target_K=100)
 
 def test_interpolate_iv_wrong_surface_shape():
     strikes = [90, 100, 110]
@@ -141,23 +141,23 @@ def test_interpolate_iv_wrong_surface_shape():
     surface = np.full((2, 3), 0.2)
 
     with pytest.raises(ValueError):
-        interpolate_iv(surface, strikes, expiries, K=100, T=0.25)
+        interpolate_iv(surface, expiries, strikes, target_T=0.25, target_K=100)
 
 def test_interpolate_iv_rejects_singleton_grid_dimension():
     with pytest.raises(ValueError):
-        interpolate_iv(np.array([[0.2, 0.3]]), [100, 110], [1], K=105, T=1)
+        interpolate_iv(np.array([[0.2, 0.3]]), [1], [100, 110], target_T=1, target_K=105)
 
     with pytest.raises(ValueError):
-        interpolate_iv(np.array([[0.2], [0.3]]), [100], [1, 2], K=100, T=1.5)
+        interpolate_iv(np.array([[0.2], [0.3]]), [1, 2], [100], target_T=1.5, target_K=100)
 
 def test_interpolate_iv_rejects_unsorted_or_duplicate_grid():
     surface = np.full((3, 3), 0.2)
 
     with pytest.raises(ValueError):
-        interpolate_iv(surface, [90, 110, 100], [0.1, 0.25, 0.5], K=100, T=0.25)
+        interpolate_iv(surface, [0.1, 0.25, 0.5], [90, 110, 100], target_T=0.25, target_K=100)
 
     with pytest.raises(ValueError):
-        interpolate_iv(surface, [90, 100, 110], [0.1, 0.25, 0.25], K=100, T=0.25)
+        interpolate_iv(surface, [0.1, 0.25, 0.25], [90, 100, 110], target_T=0.25, target_K=100)
 
 def test_interpolate_iv_exact_grid_point():
     strikes = [90, 100, 110]
@@ -167,7 +167,7 @@ def test_interpolate_iv_exact_grid_point():
         [0.19, 0.21, 0.23],
         [0.20, 0.22, 0.24],
     ])
-    iv = interpolate_iv(surface, strikes, expiries, K=100, T=0.25)
+    iv = interpolate_iv(surface, expiries, strikes, target_T=0.25, target_K=100)
 
     assert abs(iv - 0.21) < 1e-4
 
@@ -180,7 +180,7 @@ def test_interpolate_iv_upper_boundary_grid_point():
         [0.20, 0.22, 0.24],
     ])
 
-    iv = interpolate_iv(surface, strikes, expiries, K=110, T=0.5)
+    iv = interpolate_iv(surface, expiries, strikes, target_T=0.5, target_K=110)
 
     assert abs(iv - 0.24) < 1e-4
 
@@ -193,6 +193,6 @@ def test_interpolate_iv_lower_boundary_grid_point():
         [0.20, 0.22, 0.24],
     ])
 
-    iv = interpolate_iv(surface, strikes, expiries, K=90, T=0.1)
+    iv = interpolate_iv(surface, expiries, strikes, target_T=0.1, target_K=90)
 
     assert abs(iv - 0.18) < 1e-4
