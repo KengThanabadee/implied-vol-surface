@@ -108,9 +108,12 @@ def fetch_chain(underlying: str = "BTC") -> pd.DataFrame:
             }
         )
 
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
+    if not rows:
+        return pd.DataFrame(rows)
 
-    df = df.sort_values(["expiry_dt", "strike"]).reset_index(drop=True)
+    expiry_dts = [row.pop("expiry_dt") for row in rows]
+    df = pd.DataFrame(rows)
+    df["expiry_dt"] = pd.Series(expiry_dts, dtype=object)
+
+    df = df.sort_values(["tau", "strike"]).reset_index(drop=True)
     return df
