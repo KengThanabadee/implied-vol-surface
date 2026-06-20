@@ -17,6 +17,7 @@ This is an early local package in a personal quant-library ecosystem. It is usef
 - Builds a 2D IV surface from a grid of option prices.
 - Interpolates IV inside an expiry/strike grid with bilinear interpolation.
 - Fetches and parses Bybit option-chain ticker data into a DataFrame, keeping market quotes separate from exchange mark values.
+- Converts usable option-chain mid prices into the expiry/strike grid used by the surface builder.
 
 ## Core Data Shape
 
@@ -101,6 +102,20 @@ Returns bilinearly interpolated IV at the target `(T, K)`. Raises `ValueError` i
 Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFrame with parsed symbol fields, bid/ask prices, bid/ask IVs, mid price, mark price, mark IV, underlying price, and time to expiry.
 
 `mid_price` is computed only from valid positive bid/ask quotes. If the bid/ask quote is not usable, `mid_price` is `NaN` and `quote_source` is `"none"`; the fetcher does not silently fall back to `mark_price`.
+
+### `prepare_surface_inputs(chain, flag="call")`
+
+Filters a fetched option-chain DataFrame to usable bid/ask mid prices and returns `prices`, `S`, `expiries`, and `strikes` for `build_surface`.
+
+### `build_surface_from_chain(chain, flag="call", r=0)`
+
+Convenience wrapper for:
+
+```text
+fetch_chain() -> prepare_surface_inputs() -> build_surface()
+```
+
+Returns the IV surface together with the price grid, spot, expiries, and strikes. Missing usable quotes remain `NaN` in the price grid and surface.
 
 ## Assumptions And Limitations
 
