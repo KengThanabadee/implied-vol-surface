@@ -21,11 +21,11 @@ This is an early local package in a personal quant-library ecosystem. It is usef
 
 ## Core Data Shape
 
-Surface arrays use expiry rows and strike columns:
+IV surface arrays use expiry rows and strike columns:
 
 ```text
-surface.shape == (len(expiries), len(strikes))
-surface[i, j] == IV at expiries[i], strikes[j]
+iv_surface.shape == (len(expiries), len(strikes))
+iv_surface[i, j] == IV at expiries[i], strikes[j]
 ```
 
 Example layout:
@@ -60,40 +60,42 @@ import numpy as np
 
 from iv_surface.solver import bs_price, build_surface, interpolate_iv
 
-S = 100
+spot_price = 100
 r = 0.03
 sigma = 0.20
 
 expiries = [0.10, 0.25, 0.50]
 strikes = [90, 100, 110]
 
-prices = np.array([
-    [bs_price(S, K, T, r, sigma, "call") for K in strikes]
+option_price_grid = np.array([
+    [bs_price(spot_price, K, T, r, sigma, "call") for K in strikes]
     for T in expiries
 ])
 
-surface = build_surface(prices, S, expiries, strikes, r, flag="call")
-iv = interpolate_iv(surface, expiries, strikes, target_T=0.18, target_K=97)
+iv_surface = build_surface(
+    option_price_grid, spot_price, expiries, strikes, r, flag="call"
+)
+iv = interpolate_iv(iv_surface, expiries, strikes, target_T=0.18, target_K=97)
 
-print(surface)
+print(iv_surface)
 print(iv)
 ```
 
 ## API
 
-### `bs_price(S, K, T, r, sigma, flag, t=0)`
+### `bs_price(spot_price, K, T, r, sigma, flag, t=0)`
 
 Returns the Black-Scholes price for a European call or put.
 
-### `solve_iv(price, S, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0)`
+### `solve_iv(option_price, spot_price, K, T, r, flag, sigma_low=1e-6, sigma_high=10.0)`
 
 Returns implied volatility for a single option price. Raises `ValueError` for invalid inputs, expired options, or prices outside the bracket implied by the sigma bounds.
 
-### `build_surface(prices, S, expiries, strikes, r=0, flag="call")`
+### `build_surface(option_price_grid, spot_price, expiries, strikes, r=0, flag="call")`
 
 Returns a 2D NumPy array of implied volatilities with shape `(n_expiries, n_strikes)`. Cells that cannot be solved are filled with `NaN`.
 
-### `interpolate_iv(surface, expiries, strikes, target_T, target_K)`
+### `interpolate_iv(iv_surface, expiries, strikes, target_T, target_K)`
 
 Returns bilinearly interpolated IV at the target `(T, K)`. Raises `ValueError` if the target point is outside the grid or if the grid is not valid.
 
@@ -105,7 +107,7 @@ Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFra
 
 ### `prepare_surface_inputs(chain, flag="call")`
 
-Filters a fetched option-chain DataFrame to usable bid/ask mid prices and returns `prices`, `S`, `expiries`, and `strikes` for `build_surface`.
+Filters a fetched option-chain DataFrame to usable bid/ask mid prices and returns `option_price_grid`, `spot_price`, `expiries`, and `strikes` for `build_surface`.
 
 ### `build_surface_from_chain(chain, flag="call", r=0)`
 
@@ -115,7 +117,7 @@ Convenience wrapper for:
 fetch_chain() -> prepare_surface_inputs() -> build_surface()
 ```
 
-Returns the IV surface together with the price grid, spot, expiries, and strikes. Missing usable quotes remain `NaN` in the price grid and surface.
+Returns the IV surface together with the option price grid, spot price, expiries, and strikes. Missing usable quotes remain `NaN` in the price grid and IV surface.
 
 ## Assumptions And Limitations
 

@@ -19,17 +19,17 @@ _VALID_FLAGS = {"call", "put"}
 
 @dataclass(frozen=True)
 class SurfaceInputs:
-    prices: np.ndarray
-    S: float
+    option_price_grid: np.ndarray
+    spot_price: float
     expiries: list[float]
     strikes: list[float]
 
 
 @dataclass(frozen=True)
 class SurfaceResult:
-    surface: np.ndarray
-    prices: np.ndarray
-    S: float
+    iv_surface: np.ndarray
+    option_price_grid: np.ndarray
+    spot_price: float
     expiries: list[float]
     strikes: list[float]
 
@@ -76,22 +76,36 @@ def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceIn
     strikes = sorted(usable["strike"].unique().tolist())
 
     price_grid = usable.pivot(index="tau", columns="strike", values="mid_price")
-    prices = price_grid.reindex(index=expiries, columns=strikes).to_numpy(dtype=float)
-    S = float(usable["underlying_price"].median())
+    option_price_grid = price_grid.reindex(index=expiries, columns=strikes).to_numpy(
+        dtype=float
+    )
+    spot_price = float(usable["underlying_price"].median())
 
-    return SurfaceInputs(prices=prices, S=S, expiries=expiries, strikes=strikes)
+    return SurfaceInputs(
+        option_price_grid=option_price_grid,
+        spot_price=spot_price,
+        expiries=expiries,
+        strikes=strikes,
+    )
 
 
 def build_surface_from_chain(
     chain: pd.DataFrame, flag: str = "call", r: float = 0
 ) -> SurfaceResult:
     inputs = prepare_surface_inputs(chain, flag=flag)
-    surface = build_surface(inputs.prices, inputs.S, inputs.expiries, inputs.strikes, r, flag)
+    iv_surface = build_surface(
+        inputs.option_price_grid,
+        inputs.spot_price,
+        inputs.expiries,
+        inputs.strikes,
+        r,
+        flag,
+    )
 
     return SurfaceResult(
-        surface=surface,
-        prices=inputs.prices,
-        S=inputs.S,
+        iv_surface=iv_surface,
+        option_price_grid=inputs.option_price_grid,
+        spot_price=inputs.spot_price,
         expiries=inputs.expiries,
         strikes=inputs.strikes,
     )

@@ -44,14 +44,14 @@ def test_prepare_surface_inputs_filters_sorts_and_keeps_missing_cells():
     result = prepare_surface_inputs(chain, flag="call")
 
     assert isinstance(result, SurfaceInputs)
-    assert result.S == 100
+    assert result.spot_price == 100
     assert result.expiries == [0.25, 0.5]
     assert result.strikes == [90, 100]
-    assert result.prices.shape == (2, 2)
-    assert result.prices[0, 0] == 10
-    assert result.prices[0, 1] == 12
-    assert np.isnan(result.prices[1, 0])
-    assert result.prices[1, 1] == 11
+    assert result.option_price_grid.shape == (2, 2)
+    assert result.option_price_grid[0, 0] == 10
+    assert result.option_price_grid[0, 1] == 12
+    assert np.isnan(result.option_price_grid[1, 0])
+    assert result.option_price_grid[1, 1] == 11
 
 
 def test_prepare_surface_inputs_uses_selected_put_flag():
@@ -64,7 +64,7 @@ def test_prepare_surface_inputs_uses_selected_put_flag():
 
     result = prepare_surface_inputs(chain, flag="put")
 
-    assert result.prices.tolist() == [[8.0]]
+    assert result.option_price_grid.tolist() == [[8.0]]
 
 
 def test_prepare_surface_inputs_rejects_invalid_flag():
@@ -101,7 +101,7 @@ def test_prepare_surface_inputs_rejects_duplicate_tau_strike():
 
 
 def test_build_surface_from_chain_solves_iv_surface_from_mid_prices():
-    S = 100
+    spot_price = 100
     r = 0.01
     sigma = 0.2
     expiries = [0.25, 0.5]
@@ -114,15 +114,15 @@ def test_build_surface_from_chain_solves_iv_surface_from_mid_prices():
                 _row(
                     tau=T,
                     strike=K,
-                    mid_price=bs_price(S, K, T, r, sigma, "call"),
-                    underlying_price=S,
+                    mid_price=bs_price(spot_price, K, T, r, sigma, "call"),
+                    underlying_price=spot_price,
                 )
             )
 
     result = build_surface_from_chain(pd.DataFrame(rows), flag="call", r=r)
 
     assert isinstance(result, SurfaceResult)
-    assert result.S == S
+    assert result.spot_price == spot_price
     assert result.expiries == expiries
     assert result.strikes == strikes
-    assert np.allclose(result.surface, sigma, atol=1e-4)
+    assert np.allclose(result.iv_surface, sigma, atol=1e-4)
