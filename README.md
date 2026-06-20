@@ -1,8 +1,8 @@
-# iv-surface
+# implied-vol-surface
 
 A small personal quant library for learning and building implied-volatility tooling from first principles.
 
-`iv-surface` provides Black-Scholes pricing helpers, implied-volatility root finding, simple surface construction, bilinear interpolation, and basic Bybit option-chain fetching.
+`implied-vol-surface` provides Black-Scholes pricing helpers, implied-volatility root finding, simple surface construction, bilinear interpolation, and basic Bybit option-chain fetching.
 
 The implied-volatility root-finding logic is implemented without `scipy.optimize`.
 

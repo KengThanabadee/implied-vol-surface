@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "iv-surface"
+name = "implied-vol-surface"
 version = "0.1.0"
 description = "Black-Scholes implied-volatility solving and simple IV surface interpolation."
 readme = "README.md"
