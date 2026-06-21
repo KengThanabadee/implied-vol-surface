@@ -25,12 +25,15 @@ def test_compute_mid_price_uses_valid_bid_ask_only():
 def test_parse_symbol_call_and_put():
     call = parse_symbol("BTC-27JUN25-100000-C")
     put = parse_symbol("BTC-27JUN25-100000-P")
+    usdt_call = parse_symbol("BTC-27JUN25-100000-C-USDT")
 
     assert call["underlying"] == "BTC"
     assert call["expiry_dt"] == datetime(2025, 6, 27, 8, tzinfo=timezone.utc)
     assert call["strike"] == 100000.0
     assert call["flag"] == "call"
     assert put["flag"] == "put"
+    assert usdt_call["flag"] == "call"
+    assert usdt_call["strike"] == 100000.0
 
 
 def test_parse_symbol_rejects_invalid_flag():
@@ -68,7 +71,7 @@ def test_fetch_chain_uses_mid_price_as_quote_source(monkeypatch):
         "result": {
             "list": [
                 {
-                    "symbol": "BTC-27JUN30-100000-C",
+                    "symbol": "BTC-27JUN30-100000-C-USDT",
                     "bid1Price": "100",
                     "ask1Price": "120",
                     "bid1Iv": "0.55",
@@ -107,7 +110,7 @@ def test_fetch_chain_does_not_fallback_to_mark_price(monkeypatch):
         "result": {
             "list": [
                 {
-                    "symbol": "BTC-27JUN30-100000-C",
+                    "symbol": "BTC-27JUN30-100000-C-USDT",
                     "bid1Price": "0",
                     "ask1Price": "120",
                     "markPrice": "108",

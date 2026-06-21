@@ -136,3 +136,13 @@ Returns the IV surface together with the option price grid, spot price, expiries
 ```bash
 pytest
 ```
+
+## Manual Live Check
+
+Unit tests use mocked data and do not call Bybit. To sanity-check the live option-chain pipeline manually:
+
+```bash
+python scripts/check_bybit_chain.py --underlying BTC
+```
+
+This fetches the live chain from Bybit's `api.bytick.com` endpoint, builds call and put surfaces from usable bid/ask mid prices, and prints quote counts, grid shape, and `NaN` ratios.

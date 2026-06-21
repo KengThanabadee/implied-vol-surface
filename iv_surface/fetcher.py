@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-_BYBIT_TICKERS_URL = "https://api.bybit.com/v5/market/tickers"
+_BYBIT_TICKERS_URL = "https://api.bytick.com/v5/market/tickers"
 _EXPIRY_FMT = "%d%b%y"
 
 
@@ -27,11 +27,14 @@ def _compute_mid_price(bid_price, ask_price):
 
 
 def parse_symbol(symbol: str) -> dict:
-    """Parse a Bybit option symbol like BTC-27JUN25-100000-C into components."""
+    """Parse Bybit option symbols with optional settle coin suffix."""
     parts = symbol.split("-")
-    if len(parts) != 4:
+    if len(parts) == 4:
+        underlying, expiry_str, strike_str, flag_char = parts
+    elif len(parts) == 5:
+        underlying, expiry_str, strike_str, flag_char, _settle_coin = parts
+    else:
         raise ValueError(f"Unexpected symbol format: {symbol!r}")
-    underlying, expiry_str, strike_str, flag_char = parts
     expiry_dt = datetime.strptime(expiry_str, _EXPIRY_FMT).replace(
         hour=8, tzinfo=timezone.utc
     )
