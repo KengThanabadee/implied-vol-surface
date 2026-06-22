@@ -109,6 +109,8 @@ Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFra
 
 Filters a fetched option-chain DataFrame to usable bid/ask mid prices and returns `option_price_grid`, `spot_price`, `expiries`, and `strikes` for `build_surface`.
 
+`spot_price` is the median `underlying_price` across usable rows. If usable rows have different `underlying_price` values, a warning is emitted.
+
 ### `build_surface_from_chain(chain, flag="call", r=0)`
 
 Convenience wrapper for:

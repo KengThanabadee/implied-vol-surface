@@ -84,7 +84,7 @@ def test_build_surface_round_trip():
 
     iv_surface = build_surface(option_price_grid, spot_price, expiries, strikes, r)
 
-    assert np.allclose(sigma, iv_surface, atol=1e-4)
+    assert np.allclose(sigma, iv_surface, rtol=0.0, atol=1e-4)
 
 def test_build_surface_wrong_price_shape():
     strikes = [90, 100, 110]

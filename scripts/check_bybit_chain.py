@@ -1,11 +1,13 @@
 import argparse
 import sys
+import warnings
 
 import numpy as np
 import requests
 
-from iv_surface.collector import build_surface_from_chain, prepare_surface_inputs
+from iv_surface.collector import _filter_usable_chain_rows, prepare_surface_inputs
 from iv_surface.fetcher import fetch_chain
+from iv_surface.solver import build_surface
 
 
 def _nan_ratio(values):
@@ -14,29 +16,63 @@ def _nan_ratio(values):
     return float(np.isnan(values).mean())
 
 
+def _print_underlying_price_summary(usable_rows, selected_spot_price):
+    underlying_prices = usable_rows["underlying_price"].dropna()
+    if underlying_prices.empty:
+        return
+
+    min_price = float(underlying_prices.min())
+    median_price = float(underlying_prices.median())
+    max_price = float(underlying_prices.max())
+    spread = max_price - min_price
+    print(
+        "underlying_price: "
+        f"selected_spot_price={selected_spot_price:.8g}, "
+        f"median={median_price:.8g}, min={min_price:.8g}, "
+        f"max={max_price:.8g}, spread={spread:.8g}"
+    )
+    if underlying_prices.nunique() > 1:
+        print("warning: underlying_price differs across usable rows; using median")
+    if not np.isclose(selected_spot_price, median_price, rtol=0.0, atol=1e-4):
+        print("warning: selected_spot_price differs from usable underlying_price median")
+
+
 def _print_flag_summary(chain, flag, r):
     flag_rows = chain[chain["flag"] == flag]
-    usable_rows = flag_rows[
-        (flag_rows["quote_source"] == "mid") & np.isfinite(flag_rows["mid_price"])
-    ]
+    usable_rows = _filter_usable_chain_rows(chain, flag)
 
     print(f"\n[{flag}]")
     print(f"rows: {len(flag_rows)}")
-    print(f"usable_mid_rows: {len(usable_rows)}")
+    print(f"usable_chain_rows: {len(usable_rows)}")
 
     if usable_rows.empty:
         print("surface_inputs: no usable mid quotes")
         return
 
-    inputs = prepare_surface_inputs(chain, flag=flag)
-    result = build_surface_from_chain(chain, flag=flag, r=r)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="usable rows have different underlying_price values.*",
+            category=UserWarning,
+        )
+        inputs = prepare_surface_inputs(chain, flag=flag)
+
+    iv_surface = build_surface(
+        inputs.option_price_grid,
+        inputs.spot_price,
+        inputs.expiries,
+        inputs.strikes,
+        r,
+        flag,
+    )
 
     print(f"spot_price: {inputs.spot_price:.8g}")
+    _print_underlying_price_summary(usable_rows, inputs.spot_price)
     print(f"expiries_count: {len(inputs.expiries)}")
     print(f"strikes_count: {len(inputs.strikes)}")
     print(f"option_price_grid_shape: {inputs.option_price_grid.shape}")
     print(f"option_price_grid_nan_ratio: {_nan_ratio(inputs.option_price_grid):.2%}")
-    print(f"iv_surface_nan_ratio: {_nan_ratio(result.iv_surface):.2%}")
+    print(f"iv_surface_nan_ratio: {_nan_ratio(iv_surface):.2%}")
 
     if inputs.expiries:
         print(f"expiry_range_tau: {inputs.expiries[0]:.6g} -> {inputs.expiries[-1]:.6g}")
@@ -65,7 +101,10 @@ def main():
 
     print("flag_counts:")
     print(chain["flag"].value_counts(dropna=False).to_string())
-    print(f"usable_mid_rows: {int((chain['quote_source'] == 'mid').sum())}")
+    usable_chain_rows = sum(
+        len(_filter_usable_chain_rows(chain, flag)) for flag in ["call", "put"]
+    )
+    print(f"usable_chain_rows: {usable_chain_rows}")
 
     for flag in ["call", "put"]:
         _print_flag_summary(chain, flag=flag, r=args.r)

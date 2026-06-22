@@ -32,8 +32,8 @@ def _row(
 def test_prepare_surface_inputs_filters_sorts_and_keeps_missing_cells():
     chain = pd.DataFrame(
         [
-            _row(tau=0.5, strike=100, mid_price=11, underlying_price=99),
-            _row(tau=0.25, strike=90, mid_price=10, underlying_price=101),
+            _row(tau=0.5, strike=100, mid_price=11),
+            _row(tau=0.25, strike=90, mid_price=10),
             _row(tau=0.25, strike=100, mid_price=12, underlying_price=100),
             _row(flag="put", tau=0.25, strike=90, mid_price=99),
             _row(tau=0.5, strike=110, mid_price=np.nan),
@@ -52,6 +52,21 @@ def test_prepare_surface_inputs_filters_sorts_and_keeps_missing_cells():
     assert result.option_price_grid[0, 1] == 12
     assert np.isnan(result.option_price_grid[1, 0])
     assert result.option_price_grid[1, 1] == 11
+
+
+def test_prepare_surface_inputs_warns_when_underlying_prices_differ():
+    chain = pd.DataFrame(
+        [
+            _row(tau=0.25, strike=90, mid_price=10, underlying_price=99),
+            _row(tau=0.25, strike=100, mid_price=12, underlying_price=100),
+            _row(tau=0.5, strike=100, mid_price=11, underlying_price=101),
+        ]
+    )
+
+    with pytest.warns(UserWarning, match="different underlying_price"):
+        result = prepare_surface_inputs(chain, flag="call")
+
+    assert result.spot_price == 100
 
 
 def test_prepare_surface_inputs_uses_selected_put_flag():
@@ -125,4 +140,4 @@ def test_build_surface_from_chain_solves_iv_surface_from_mid_prices():
     assert result.spot_price == spot_price
     assert result.expiries == expiries
     assert result.strikes == strikes
-    assert np.allclose(result.iv_surface, sigma, atol=1e-4)
+    assert np.allclose(result.iv_surface, sigma, rtol=0.0, atol=1e-4)

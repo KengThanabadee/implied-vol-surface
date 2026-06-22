@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ _REQUIRED_COLUMNS = {
     "quote_source",
     "underlying_price",
 }
+_USABLE_CHAIN_NUMERIC_COLUMNS = ["tau", "strike", "mid_price", "underlying_price"]
 _VALID_FLAGS = {"call", "put"}
 
 
@@ -45,14 +47,12 @@ def _validate_chain(chain: pd.DataFrame, flag: str) -> None:
         raise ValueError(f"chain is missing required columns: {missing}")
 
 
-def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceInputs:
-    _validate_chain(chain, flag)
-
+def _filter_usable_chain_rows(chain: pd.DataFrame, flag: str) -> pd.DataFrame:
     data = chain.copy()
-    for column in ["tau", "strike", "mid_price", "underlying_price"]:
+    for column in _USABLE_CHAIN_NUMERIC_COLUMNS:
         data[column] = pd.to_numeric(data[column], errors="coerce")
 
-    usable = data[
+    return data[
         (data["flag"] == flag)
         & (data["quote_source"] == "mid")
         & np.isfinite(data["mid_price"])
@@ -64,6 +64,12 @@ def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceIn
         & (data["strike"] > 0)
         & (data["underlying_price"] > 0)
     ].copy()
+
+
+def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceInputs:
+    _validate_chain(chain, flag)
+
+    usable = _filter_usable_chain_rows(chain, flag)
 
     if usable.empty:
         raise ValueError(f"chain has no usable {flag} rows with valid mid prices")
@@ -80,6 +86,13 @@ def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceIn
         dtype=float
     )
     spot_price = float(usable["underlying_price"].median())
+    if usable["underlying_price"].nunique() > 1:
+        warnings.warn(
+            "usable rows have different underlying_price values; using median "
+            f"spot_price={spot_price}",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return SurfaceInputs(
         option_price_grid=option_price_grid,
