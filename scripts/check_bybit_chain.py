@@ -6,7 +6,7 @@ import numpy as np
 import requests
 
 from iv_surface.collector import _filter_usable_chain_rows, prepare_surface_inputs
-from iv_surface.fetcher import fetch_chain
+from iv_surface.fetcher import DEFAULT_BYBIT_BASE_URL, DEFAULT_BYBIT_TIMEOUT, fetch_chain
 from iv_surface.solver import build_surface
 
 
@@ -14,6 +14,13 @@ def _nan_ratio(values):
     if values.size == 0:
         return np.nan
     return float(np.isnan(values).mean())
+
+
+def _positive_float(value):
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
 
 
 def _print_underlying_price_summary(usable_rows, selected_spot_price):
@@ -85,16 +92,29 @@ def main():
         description="Manual live Bybit sanity check for option-chain to IV surface flow."
     )
     parser.add_argument("--underlying", default="BTC", help="Bybit option base coin")
+    parser.add_argument(
+        "--base-url",
+        default=DEFAULT_BYBIT_BASE_URL,
+        help="Bybit REST API base URL",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=DEFAULT_BYBIT_TIMEOUT,
+        help="HTTP request timeout in seconds",
+    )
     parser.add_argument("--r", type=float, default=0.0, help="Risk-free rate")
     args = parser.parse_args()
 
     try:
-        chain = fetch_chain(args.underlying)
+        chain = fetch_chain(args.underlying, base_url=args.base_url, timeout=args.timeout)
     except requests.RequestException as exc:
         print(f"Bybit request failed: {exc}", file=sys.stderr)
         return 1
 
     print(f"underlying: {args.underlying}")
+    print(f"base_url: {args.base_url}")
+    print(f"timeout: {args.timeout:g}")
     print(f"rows: {len(chain)}")
     if chain.empty:
         return 0

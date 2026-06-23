@@ -4,7 +4,14 @@ import numpy as np
 import pytest
 
 from iv_surface import fetcher
-from iv_surface.fetcher import _compute_mid_price, _to_float, compute_tau, fetch_chain, parse_symbol
+from iv_surface.fetcher import (
+    _bybit_tickers_url,
+    _compute_mid_price,
+    _to_float,
+    compute_tau,
+    fetch_chain,
+    parse_symbol,
+)
 
 
 def test_to_float_returns_nan_for_bad_values():
@@ -85,9 +92,9 @@ def test_fetch_chain_uses_mid_price_as_quote_source(monkeypatch):
     }
 
     def fake_get(url, params, timeout):
-        assert url == fetcher._BYBIT_TICKERS_URL
+        assert url == f"{fetcher.DEFAULT_BYBIT_BASE_URL}/v5/market/tickers"
         assert params == {"category": "option", "baseCoin": "BTC"}
-        assert timeout == 10
+        assert timeout == fetcher.DEFAULT_BYBIT_TIMEOUT
         return _FakeResponse(payload)
 
     monkeypatch.setattr(fetcher.requests, "get", fake_get)
@@ -103,6 +110,29 @@ def test_fetch_chain_uses_mid_price_as_quote_source(monkeypatch):
     assert row["ask_iv"] == 0.65
     assert row["mark_price"] == 108
     assert row["mark_iv"] == 0.60
+
+
+def test_fetch_chain_accepts_custom_base_url_and_timeout(monkeypatch):
+    payload = {"result": {"list": []}}
+
+    def fake_get(url, params, timeout):
+        assert url == "https://api.bybit.com/v5/market/tickers"
+        assert params == {"category": "option", "baseCoin": "ETH"}
+        assert timeout == 3
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(fetcher.requests, "get", fake_get)
+
+    df = fetch_chain("ETH", base_url="https://api.bybit.com", timeout=3)
+
+    assert df.empty
+
+
+def test_bybit_tickers_url_normalizes_trailing_slash():
+    assert (
+        _bybit_tickers_url("https://api.bytick.com/")
+        == "https://api.bytick.com/v5/market/tickers"
+    )
 
 
 def test_fetch_chain_does_not_fallback_to_mark_price(monkeypatch):

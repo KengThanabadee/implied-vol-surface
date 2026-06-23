@@ -147,4 +147,13 @@ Unit tests use mocked data and do not call Bybit. To sanity-check the live optio
 python scripts/check_bybit_chain.py --underlying BTC
 ```
 
-This fetches the live chain from Bybit's `api.bytick.com` endpoint, builds call and put surfaces from usable bid/ask mid prices, and prints quote counts, grid shape, and `NaN` ratios.
+This fetches the live chain from Bybit's `api.bytick.com` endpoint by default, builds call and put surfaces from usable bid/ask mid prices, and prints quote counts, grid shape, and `NaN` ratios.
+
+To choose an explicit Bybit REST host or timeout:
+
+```bash
+python scripts/check_bybit_chain.py --underlying BTC --base-url https://api.bybit.com
+python scripts/check_bybit_chain.py --underlying BTC --base-url https://api.bytick.com --timeout 20
+```
+
+`api.bytick.com` is the default because it works in the current development environment. The script does not silently fall back between hosts; use `--base-url` to make the endpoint explicit.

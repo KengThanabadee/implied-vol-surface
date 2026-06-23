@@ -4,8 +4,13 @@ import numpy as np
 import pandas as pd
 import requests
 
-_BYBIT_TICKERS_URL = "https://api.bytick.com/v5/market/tickers"
+DEFAULT_BYBIT_BASE_URL = "https://api.bytick.com"
+DEFAULT_BYBIT_TIMEOUT = 10
 _EXPIRY_FMT = "%d%b%y"
+
+
+def _bybit_tickers_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/v5/market/tickers"
 
 
 def _to_float(value):
@@ -55,10 +60,14 @@ def compute_tau(expiry_dt: datetime, now: datetime) -> float:
     return max(seconds / (365.25 * 24 * 3600), 0.0)
 
 
-def fetch_chain(underlying: str = "BTC") -> pd.DataFrame:
+def fetch_chain(
+    underlying: str = "BTC",
+    base_url: str = DEFAULT_BYBIT_BASE_URL,
+    timeout: float = DEFAULT_BYBIT_TIMEOUT,
+) -> pd.DataFrame:
     """Fetch live option chain from Bybit and return a tidy DataFrame."""
     params = {"category": "option", "baseCoin": underlying}
-    resp = requests.get(_BYBIT_TICKERS_URL, params=params, timeout=10)
+    resp = requests.get(_bybit_tickers_url(base_url), params=params, timeout=timeout)
     resp.raise_for_status()
 
     try:
