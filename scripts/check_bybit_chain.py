@@ -1,4 +1,5 @@
 import argparse
+from collections import Counter
 import sys
 import warnings
 
@@ -7,13 +8,17 @@ import requests
 
 from iv_surface.collector import _filter_usable_chain_rows, prepare_surface_inputs
 from iv_surface.fetcher import DEFAULT_BYBIT_BASE_URL, DEFAULT_BYBIT_TIMEOUT, fetch_chain
-from iv_surface.solver import build_surface
+from iv_surface.solver import solve_iv
 
 
 def _nan_ratio(values):
     if values.size == 0:
         return np.nan
     return float(np.isnan(values).mean())
+
+
+def _finite_count(values):
+    return int(np.isfinite(values).sum())
 
 
 def _positive_float(value):
@@ -44,6 +49,104 @@ def _print_underlying_price_summary(usable_rows, selected_spot_price):
         print("warning: selected_spot_price differs from usable underlying_price median")
 
 
+def _classify_solve_error(error_message):
+    if "outside no-arbitrage bounds" in error_message:
+        return "outside_no_arbitrage_bounds"
+    if "must be finite" in error_message:
+        return "non_finite_input"
+    if "T must be > 0" in error_message:
+        return "non_positive_tau"
+    return "other_value_error"
+
+
+def _solve_iv_grid_diagnostics(option_price_grid, spot_price, expiries, strikes, r, flag):
+    iv_surface = np.full(option_price_grid.shape, np.nan)
+    failure_reasons = Counter()
+
+    for i, T in enumerate(expiries):
+        for j, K in enumerate(strikes):
+            option_price = option_price_grid[i, j]
+            if not np.isfinite(option_price):
+                failure_reasons["missing_option_price"] += 1
+                continue
+
+            try:
+                iv_surface[i, j] = solve_iv(option_price, spot_price, K, T, r, flag)
+            except ValueError as exc:
+                failure_reasons[_classify_solve_error(str(exc))] += 1
+
+    return iv_surface, failure_reasons
+
+
+def _compare_median_spot_to_row_spot(usable_rows, selected_spot_price, r, flag):
+    counts = Counter(
+        {
+            "total_usable_rows": len(usable_rows),
+            "median_spot_solved": 0,
+            "row_spot_solved": 0,
+            "row_spot_fixes_median_failure": 0,
+            "median_spot_fixes_row_failure": 0,
+            "failed_both": 0,
+        }
+    )
+
+    for row in usable_rows.itertuples(index=False):
+        median_solved = True
+        row_solved = True
+
+        try:
+            solve_iv(row.mid_price, selected_spot_price, row.strike, row.tau, r, flag)
+        except ValueError:
+            median_solved = False
+
+        try:
+            solve_iv(row.mid_price, row.underlying_price, row.strike, row.tau, r, flag)
+        except ValueError:
+            row_solved = False
+
+        if median_solved:
+            counts["median_spot_solved"] += 1
+        if row_solved:
+            counts["row_spot_solved"] += 1
+        if row_solved and not median_solved:
+            counts["row_spot_fixes_median_failure"] += 1
+        if median_solved and not row_solved:
+            counts["median_spot_fixes_row_failure"] += 1
+        if not median_solved and not row_solved:
+            counts["failed_both"] += 1
+
+    return counts
+
+
+def _print_counter(counter):
+    if not counter:
+        print("  none")
+        return
+
+    for key, count in counter.most_common():
+        print(f"  {key}: {count}")
+
+
+def _print_expiry_coverage(usable_rows):
+    print("expiry_coverage:")
+    if usable_rows.empty:
+        print("  none")
+        return
+
+    summary = (
+        usable_rows.groupby("tau")["strike"]
+        .agg(usable_rows="count", min_strike="min", max_strike="max")
+        .reset_index()
+        .sort_values("tau")
+    )
+    for row in summary.itertuples(index=False):
+        print(
+            "  "
+            f"tau={row.tau:.6g}, usable_rows={row.usable_rows}, "
+            f"strike_range={row.min_strike:.8g}->{row.max_strike:.8g}"
+        )
+
+
 def _print_flag_summary(chain, flag, r):
     flag_rows = chain[chain["flag"] == flag]
     usable_rows = _filter_usable_chain_rows(chain, flag)
@@ -64,7 +167,7 @@ def _print_flag_summary(chain, flag, r):
         )
         inputs = prepare_surface_inputs(chain, flag=flag)
 
-    iv_surface = build_surface(
+    iv_surface, failure_reasons = _solve_iv_grid_diagnostics(
         inputs.option_price_grid,
         inputs.spot_price,
         inputs.expiries,
@@ -72,14 +175,34 @@ def _print_flag_summary(chain, flag, r):
         r,
         flag,
     )
+    spot_comparison = _compare_median_spot_to_row_spot(
+        usable_rows, inputs.spot_price, r, flag
+    )
 
     print(f"spot_price: {inputs.spot_price:.8g}")
     _print_underlying_price_summary(usable_rows, inputs.spot_price)
     print(f"expiries_count: {len(inputs.expiries)}")
     print(f"strikes_count: {len(inputs.strikes)}")
     print(f"option_price_grid_shape: {inputs.option_price_grid.shape}")
+    quoted_cells = _finite_count(inputs.option_price_grid)
+    total_cells = inputs.option_price_grid.size
+    print(f"quoted_cells: {quoted_cells}/{total_cells}")
     print(f"option_price_grid_nan_ratio: {_nan_ratio(inputs.option_price_grid):.2%}")
+    print(f"iv_solved_cells: {_finite_count(iv_surface)}/{iv_surface.size}")
     print(f"iv_surface_nan_ratio: {_nan_ratio(iv_surface):.2%}")
+    print("iv_failure_reasons:")
+    _print_counter(failure_reasons)
+    print("spot_comparison:")
+    for key in [
+        "total_usable_rows",
+        "median_spot_solved",
+        "row_spot_solved",
+        "row_spot_fixes_median_failure",
+        "median_spot_fixes_row_failure",
+        "failed_both",
+    ]:
+        print(f"  {key}: {spot_comparison[key]}")
+    _print_expiry_coverage(usable_rows)
 
     if inputs.expiries:
         print(f"expiry_range_tau: {inputs.expiries[0]:.6g} -> {inputs.expiries[-1]:.6g}")
