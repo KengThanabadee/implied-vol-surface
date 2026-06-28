@@ -72,7 +72,7 @@ def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceIn
     usable = _filter_usable_chain_rows(chain, flag)
 
     if usable.empty:
-        raise ValueError(f"chain has no usable {flag} rows with valid mid prices")
+        raise ValueError(f"chain has no usable {flag} rows after surface-input filters")
 
     duplicates = usable.duplicated(subset=["tau", "strike"], keep=False)
     if duplicates.any():

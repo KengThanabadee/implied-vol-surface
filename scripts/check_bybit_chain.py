@@ -119,7 +119,7 @@ def _print_flag_summary(chain, flag, r):
     print(f"usable_chain_rows: {len(usable_rows)}")
 
     if usable_rows.empty:
-        print("surface_inputs: no usable mid quotes")
+        print("surface_inputs: no usable rows after surface-input filters")
         return
 
     with warnings.catch_warnings():
