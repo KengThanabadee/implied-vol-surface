@@ -11,6 +11,9 @@ from iv_surface.fetcher import DEFAULT_BYBIT_BASE_URL, DEFAULT_BYBIT_TIMEOUT, fe
 from iv_surface.solver import solve_iv
 
 
+DEFAULT_LIVE_CHECK_R = 0.03
+
+
 def _nan_ratio(values):
     if values.size == 0:
         return np.nan
@@ -173,7 +176,12 @@ def main():
         default=DEFAULT_BYBIT_TIMEOUT,
         help="HTTP request timeout in seconds",
     )
-    parser.add_argument("--r", type=float, default=0.0, help="Risk-free rate")
+    parser.add_argument(
+        "--r",
+        type=float,
+        default=DEFAULT_LIVE_CHECK_R,
+        help="Risk-free rate assumption",
+    )
     args = parser.parse_args()
 
     try:
@@ -185,6 +193,7 @@ def main():
     print(f"underlying: {args.underlying}")
     print(f"base_url: {args.base_url}")
     print(f"timeout: {args.timeout:g}")
+    print(f"r: {args.r:g}")
     print(f"rows: {len(chain)}")
     if chain.empty:
         return 0

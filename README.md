@@ -149,6 +149,13 @@ python scripts/check_bybit_chain.py --underlying BTC
 
 This fetches the live chain from Bybit's `api.bytick.com` endpoint by default, builds call and put surfaces from usable bid/ask mid prices, and prints quote counts, grid shape, and `NaN` ratios.
 
+The live check uses `--r 0.03` by default as a diagnostic risk-free-rate assumption. Override it explicitly when comparing model assumptions:
+
+```bash
+python scripts/check_bybit_chain.py --underlying BTC --r 0
+python scripts/check_bybit_chain.py --underlying BTC --r 0.05
+```
+
 To choose an explicit Bybit REST host or timeout:
 
 ```bash
