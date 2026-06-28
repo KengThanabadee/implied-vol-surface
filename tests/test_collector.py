@@ -17,7 +17,7 @@ def _row(
     strike=100,
     mid_price=10,
     quote_source="mid",
-    underlying_price=100,
+    index_price=100,
 ):
     return {
         "flag": flag,
@@ -25,7 +25,7 @@ def _row(
         "strike": strike,
         "mid_price": mid_price,
         "quote_source": quote_source,
-        "underlying_price": underlying_price,
+        "index_price": index_price,
     }
 
 
@@ -34,7 +34,7 @@ def test_prepare_surface_inputs_filters_sorts_and_keeps_missing_cells():
         [
             _row(tau=0.5, strike=100, mid_price=11),
             _row(tau=0.25, strike=90, mid_price=10),
-            _row(tau=0.25, strike=100, mid_price=12, underlying_price=100),
+            _row(tau=0.25, strike=100, mid_price=12, index_price=100),
             _row(flag="put", tau=0.25, strike=90, mid_price=99),
             _row(tau=0.5, strike=110, mid_price=np.nan),
             _row(tau=0.5, strike=120, mid_price=20, quote_source="none"),
@@ -54,16 +54,16 @@ def test_prepare_surface_inputs_filters_sorts_and_keeps_missing_cells():
     assert result.option_price_grid[1, 1] == 11
 
 
-def test_prepare_surface_inputs_warns_when_underlying_prices_differ():
+def test_prepare_surface_inputs_warns_when_index_prices_differ():
     chain = pd.DataFrame(
         [
-            _row(tau=0.25, strike=90, mid_price=10, underlying_price=99),
-            _row(tau=0.25, strike=100, mid_price=12, underlying_price=100),
-            _row(tau=0.5, strike=100, mid_price=11, underlying_price=101),
+            _row(tau=0.25, strike=90, mid_price=10, index_price=99),
+            _row(tau=0.25, strike=100, mid_price=12, index_price=100),
+            _row(tau=0.5, strike=100, mid_price=11, index_price=101),
         ]
     )
 
-    with pytest.warns(UserWarning, match="different underlying_price"):
+    with pytest.warns(UserWarning, match="different index_price"):
         result = prepare_surface_inputs(chain, flag="call")
 
     assert result.spot_price == 100
@@ -96,11 +96,35 @@ def test_prepare_surface_inputs_rejects_missing_columns():
         prepare_surface_inputs(chain)
 
 
+def test_prepare_surface_inputs_rejects_missing_index_price():
+    chain = pd.DataFrame([_row()]).drop(columns=["index_price"])
+
+    with pytest.raises(ValueError):
+        prepare_surface_inputs(chain)
+
+
 def test_prepare_surface_inputs_rejects_no_usable_rows():
     chain = pd.DataFrame([_row(mid_price=np.nan), _row(quote_source="none")])
 
     with pytest.raises(ValueError):
         prepare_surface_inputs(chain)
+
+
+def test_prepare_surface_inputs_filters_invalid_index_prices():
+    chain = pd.DataFrame(
+        [
+            _row(tau=0.25, strike=90, mid_price=10, index_price=np.nan),
+            _row(tau=0.25, strike=100, mid_price=12, index_price=0),
+            _row(tau=0.5, strike=100, mid_price=11, index_price=100),
+        ]
+    )
+
+    result = prepare_surface_inputs(chain)
+
+    assert result.spot_price == 100
+    assert result.expiries == [0.5]
+    assert result.strikes == [100]
+    assert result.option_price_grid.tolist() == [[11.0]]
 
 
 def test_prepare_surface_inputs_rejects_duplicate_tau_strike():
@@ -130,7 +154,7 @@ def test_build_surface_from_chain_solves_iv_surface_from_mid_prices():
                     tau=T,
                     strike=K,
                     mid_price=bs_price(spot_price, K, T, r, sigma, "call"),
-                    underlying_price=spot_price,
+                    index_price=spot_price,
                 )
             )
 

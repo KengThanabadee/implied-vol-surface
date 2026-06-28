@@ -101,7 +101,7 @@ Returns bilinearly interpolated IV at the target `(T, K)`. Raises `ValueError` i
 
 ### `fetch_chain(underlying="BTC")`
 
-Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFrame with parsed symbol fields, bid/ask prices, bid/ask IVs, mid price, mark price, mark IV, underlying price, and time to expiry.
+Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFrame with parsed symbol fields, bid/ask prices, bid/ask IVs, mid price, mark price, mark IV, index price, and time to expiry.
 
 `mid_price` is computed only from valid positive bid/ask quotes. If the bid/ask quote is not usable, `mid_price` is `NaN` and `quote_source` is `"none"`; the fetcher does not silently fall back to `mark_price`.
 
@@ -109,7 +109,7 @@ Fetches Bybit option tickers for an underlying and returns a tidy pandas DataFra
 
 Filters a fetched option-chain DataFrame to usable bid/ask mid prices and returns `option_price_grid`, `spot_price`, `expiries`, and `strikes` for `build_surface`.
 
-`spot_price` is the median `underlying_price` across usable rows. If usable rows have different `underlying_price` values, a warning is emitted.
+`spot_price` is the median `index_price` across usable rows. If usable rows have different `index_price` values, a warning is emitted.
 
 ### `build_surface_from_chain(chain, flag="call", r=0)`
 

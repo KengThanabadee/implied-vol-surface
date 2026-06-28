@@ -1,12 +1,10 @@
 from collections import Counter
 
 import numpy as np
-import pandas as pd
 
 from iv_surface.solver import bs_price
 from scripts.check_bybit_chain import (
     _classify_solve_error,
-    _compare_median_spot_to_row_spot,
     _finite_count,
     _solve_iv_grid_diagnostics,
 )
@@ -35,55 +33,6 @@ def test_solve_iv_grid_diagnostics_counts_missing_and_bound_failures():
     assert failures == Counter(
         {"missing_option_price": 1, "outside_no_arbitrage_bounds": 1}
     )
-
-
-def test_compare_median_spot_to_row_spot_detects_row_spot_fix():
-    selected_spot_price = 200.0
-    row_spot_that_differs_from_selected = 100.0
-    row_spot_matching_selected = 200.0
-
-    rows = pd.DataFrame(
-        [
-            {
-                # This price is below intrinsic value under selected_spot_price.
-                "mid_price": bs_price(
-                    row_spot_that_differs_from_selected,
-                    100.0,
-                    0.25,
-                    0.0,
-                    0.2,
-                    "call",
-                ),
-                "strike": 100.0,
-                "tau": 0.25,
-                "underlying_price": row_spot_that_differs_from_selected,
-            },
-            {
-                "mid_price": bs_price(
-                    row_spot_matching_selected,
-                    100.0,
-                    0.25,
-                    0.0,
-                    0.2,
-                    "call",
-                ),
-                "strike": 100.0,
-                "tau": 0.25,
-                "underlying_price": row_spot_matching_selected,
-            },
-        ]
-    )
-
-    counts = _compare_median_spot_to_row_spot(
-        rows, selected_spot_price=selected_spot_price, r=0.0, flag="call"
-    )
-
-    assert counts["total_usable_rows"] == 2
-    assert counts["median_spot_solved"] == 1
-    assert counts["row_spot_solved"] == 2
-    assert counts["row_spot_fixes_median_failure"] == 1
-    assert counts["median_spot_fixes_row_failure"] == 0
-    assert counts["failed_both"] == 0
 
 
 def test_classify_solve_error_groups_expected_messages():

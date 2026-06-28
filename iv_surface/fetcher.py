@@ -95,6 +95,7 @@ def fetch_chain(
         ask_iv = _to_float(ticker.get("ask1Iv"))
         mark_price = _to_float(ticker.get("markPrice"))
         mark_iv = _to_float(ticker.get("markIv"))
+        index_price = _to_float(ticker.get("indexPrice"))
         underlying_price = _to_float(ticker.get("underlyingPrice"))
         mid_price = _compute_mid_price(bid_price, ask_price)
         quote_source = "mid" if np.isfinite(mid_price) else "none"
@@ -115,6 +116,7 @@ def fetch_chain(
                 "ask_iv": ask_iv,
                 "mark_price": mark_price,
                 "mark_iv": mark_iv,
+                "index_price": index_price,
                 "underlying_price": underlying_price,
                 "tau": tau,
             }

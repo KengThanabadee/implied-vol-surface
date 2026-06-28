@@ -28,25 +28,25 @@ def _positive_float(value):
     return parsed
 
 
-def _print_underlying_price_summary(usable_rows, selected_spot_price):
-    underlying_prices = usable_rows["underlying_price"].dropna()
-    if underlying_prices.empty:
+def _print_index_price_summary(usable_rows, selected_spot_price):
+    index_prices = usable_rows["index_price"].dropna()
+    if index_prices.empty:
         return
 
-    min_price = float(underlying_prices.min())
-    median_price = float(underlying_prices.median())
-    max_price = float(underlying_prices.max())
+    min_price = float(index_prices.min())
+    median_price = float(index_prices.median())
+    max_price = float(index_prices.max())
     spread = max_price - min_price
     print(
-        "underlying_price: "
+        "index_price: "
         f"selected_spot_price={selected_spot_price:.8g}, "
         f"median={median_price:.8g}, min={min_price:.8g}, "
         f"max={max_price:.8g}, spread={spread:.8g}"
     )
-    if underlying_prices.nunique() > 1:
-        print("warning: underlying_price differs across usable rows; using median")
+    if index_prices.nunique() > 1:
+        print("warning: index_price differs across usable rows; using median")
     if not np.isclose(selected_spot_price, median_price, rtol=0.0, atol=1e-4):
-        print("warning: selected_spot_price differs from usable underlying_price median")
+        print("warning: selected_spot_price differs from usable index_price median")
 
 
 def _classify_solve_error(error_message):
@@ -76,46 +76,6 @@ def _solve_iv_grid_diagnostics(option_price_grid, spot_price, expiries, strikes,
                 failure_reasons[_classify_solve_error(str(exc))] += 1
 
     return iv_surface, failure_reasons
-
-
-def _compare_median_spot_to_row_spot(usable_rows, selected_spot_price, r, flag):
-    counts = Counter(
-        {
-            "total_usable_rows": len(usable_rows),
-            "median_spot_solved": 0,
-            "row_spot_solved": 0,
-            "row_spot_fixes_median_failure": 0,
-            "median_spot_fixes_row_failure": 0,
-            "failed_both": 0,
-        }
-    )
-
-    for row in usable_rows.itertuples(index=False):
-        median_solved = True
-        row_solved = True
-
-        try:
-            solve_iv(row.mid_price, selected_spot_price, row.strike, row.tau, r, flag)
-        except ValueError:
-            median_solved = False
-
-        try:
-            solve_iv(row.mid_price, row.underlying_price, row.strike, row.tau, r, flag)
-        except ValueError:
-            row_solved = False
-
-        if median_solved:
-            counts["median_spot_solved"] += 1
-        if row_solved:
-            counts["row_spot_solved"] += 1
-        if row_solved and not median_solved:
-            counts["row_spot_fixes_median_failure"] += 1
-        if median_solved and not row_solved:
-            counts["median_spot_fixes_row_failure"] += 1
-        if not median_solved and not row_solved:
-            counts["failed_both"] += 1
-
-    return counts
 
 
 def _print_counter(counter):
@@ -162,7 +122,7 @@ def _print_flag_summary(chain, flag, r):
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
-            message="usable rows have different underlying_price values.*",
+            message="usable rows have different index_price values.*",
             category=UserWarning,
         )
         inputs = prepare_surface_inputs(chain, flag=flag)
@@ -175,12 +135,9 @@ def _print_flag_summary(chain, flag, r):
         r,
         flag,
     )
-    spot_comparison = _compare_median_spot_to_row_spot(
-        usable_rows, inputs.spot_price, r, flag
-    )
 
     print(f"spot_price: {inputs.spot_price:.8g}")
-    _print_underlying_price_summary(usable_rows, inputs.spot_price)
+    _print_index_price_summary(usable_rows, inputs.spot_price)
     print(f"expiries_count: {len(inputs.expiries)}")
     print(f"strikes_count: {len(inputs.strikes)}")
     print(f"option_price_grid_shape: {inputs.option_price_grid.shape}")
@@ -192,16 +149,6 @@ def _print_flag_summary(chain, flag, r):
     print(f"iv_surface_nan_ratio: {_nan_ratio(iv_surface):.2%}")
     print("iv_failure_reasons:")
     _print_counter(failure_reasons)
-    print("spot_comparison:")
-    for key in [
-        "total_usable_rows",
-        "median_spot_solved",
-        "row_spot_solved",
-        "row_spot_fixes_median_failure",
-        "median_spot_fixes_row_failure",
-        "failed_both",
-    ]:
-        print(f"  {key}: {spot_comparison[key]}")
     _print_expiry_coverage(usable_rows)
 
     if inputs.expiries:

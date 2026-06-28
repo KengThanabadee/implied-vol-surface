@@ -85,6 +85,7 @@ def test_fetch_chain_uses_mid_price_as_quote_source(monkeypatch):
                     "ask1Iv": "0.65",
                     "markPrice": "108",
                     "markIv": "0.60",
+                    "indexPrice": "99900",
                     "underlyingPrice": "100000",
                 }
             ]
@@ -110,6 +111,7 @@ def test_fetch_chain_uses_mid_price_as_quote_source(monkeypatch):
     assert row["ask_iv"] == 0.65
     assert row["mark_price"] == 108
     assert row["mark_iv"] == 0.60
+    assert row["index_price"] == 99900
 
 
 def test_fetch_chain_accepts_custom_base_url_and_timeout(monkeypatch):
@@ -145,6 +147,7 @@ def test_fetch_chain_does_not_fallback_to_mark_price(monkeypatch):
                     "ask1Price": "120",
                     "markPrice": "108",
                     "markIv": "0.60",
+                    "indexPrice": "99900",
                     "underlyingPrice": "100000",
                 }
             ]

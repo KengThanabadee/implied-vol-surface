@@ -13,9 +13,9 @@ _REQUIRED_COLUMNS = {
     "strike",
     "mid_price",
     "quote_source",
-    "underlying_price",
+    "index_price",
 }
-_USABLE_CHAIN_NUMERIC_COLUMNS = ["tau", "strike", "mid_price", "underlying_price"]
+_USABLE_CHAIN_NUMERIC_COLUMNS = ["tau", "strike", "mid_price", "index_price"]
 _VALID_FLAGS = {"call", "put"}
 
 
@@ -58,11 +58,11 @@ def _filter_usable_chain_rows(chain: pd.DataFrame, flag: str) -> pd.DataFrame:
         & np.isfinite(data["mid_price"])
         & np.isfinite(data["tau"])
         & np.isfinite(data["strike"])
-        & np.isfinite(data["underlying_price"])
+        & np.isfinite(data["index_price"])
         & (data["mid_price"] > 0)
         & (data["tau"] > 0)
         & (data["strike"] > 0)
-        & (data["underlying_price"] > 0)
+        & (data["index_price"] > 0)
     ].copy()
 
 
@@ -85,10 +85,10 @@ def prepare_surface_inputs(chain: pd.DataFrame, flag: str = "call") -> SurfaceIn
     option_price_grid = price_grid.reindex(index=expiries, columns=strikes).to_numpy(
         dtype=float
     )
-    spot_price = float(usable["underlying_price"].median())
-    if usable["underlying_price"].nunique() > 1:
+    spot_price = float(usable["index_price"].median())
+    if usable["index_price"].nunique() > 1:
         warnings.warn(
-            "usable rows have different underlying_price values; using median "
+            "usable rows have different index_price values; using median "
             f"spot_price={spot_price}",
             UserWarning,
             stacklevel=2,
