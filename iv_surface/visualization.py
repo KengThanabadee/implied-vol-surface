@@ -64,18 +64,33 @@ def make_iv_heatmap(long_frame: pd.DataFrame) -> go.Figure:
         .reindex(index=iv_grid.index, columns=iv_grid.columns)
     )
 
+    customdata = strike_grid.to_numpy(dtype=float)
+    strike_hover = "strike: %{customdata:g}<br>"
+    source_hover = ""
+    if "source" in long_frame.columns:
+        source_grid = long_frame.pivot(
+            index="tau", columns="moneyness", values="source"
+        ).reindex(index=iv_grid.index, columns=iv_grid.columns)
+        combined = np.empty((*iv_grid.shape, 2), dtype=object)
+        combined[:, :, 0] = customdata
+        combined[:, :, 1] = source_grid.to_numpy()
+        customdata = combined
+        strike_hover = "strike: %{customdata[0]:g}<br>"
+        source_hover = "source: %{customdata[1]}<br>"
+
     trace = go.Heatmap(
         x=iv_grid.columns.to_numpy(dtype=float),
         y=iv_grid.index.to_numpy(dtype=float),
         z=iv_grid.to_numpy(dtype=float),
-        customdata=strike_grid.to_numpy(dtype=float),
+        customdata=customdata,
         connectgaps=False,
         colorbar={"title": "implied volatility", "tickformat": ".0%"},
         hovertemplate=(
             "K / S: %{x:.4f}<br>"
             "tau: %{y:.4f} years<br>"
-            "strike: %{customdata:g}<br>"
-            "IV: %{z:.2%}<extra></extra>"
+            + strike_hover
+            + source_hover
+            + "IV: %{z:.2%}<extra></extra>"
         ),
     )
     figure = go.Figure(data=[trace])
@@ -101,11 +116,18 @@ def make_smile_figure(
             continue
         smile = long_frame[long_frame["tau"] == tau].sort_values("moneyness")
         expiry_label = _expiry_labels(long_frame, [tau])[0]
+        customdata = smile["strike"].to_numpy(dtype=float)
+        strike_hover = "strike: %{customdata:g}<br>"
+        source_hover = ""
+        if "source" in smile.columns:
+            customdata = smile[["strike", "source"]].to_numpy(dtype=object)
+            strike_hover = "strike: %{customdata[0]:g}<br>"
+            source_hover = "source: %{customdata[1]}<br>"
         figure.add_trace(
             go.Scatter(
                 x=smile["moneyness"].to_numpy(dtype=float),
                 y=smile["iv"].to_numpy(dtype=float),
-                customdata=smile["strike"].to_numpy(dtype=float),
+                customdata=customdata,
                 mode="lines+markers",
                 name=expiry_label,
                 meta=tau,
@@ -113,8 +135,9 @@ def make_smile_figure(
                 hovertemplate=(
                     "tau: %{meta:.4f} years<br>"
                     "K / S: %{x:.4f}<br>"
-                    "strike: %{customdata:g}<br>"
-                    "IV: %{y:.2%}<extra>%{fullData.name}</extra>"
+                    + strike_hover
+                    + source_hover
+                    + "IV: %{y:.2%}<extra>%{fullData.name}</extra>"
                 ),
             )
         )

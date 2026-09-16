@@ -76,6 +76,56 @@ def test_surface_to_long_frame_rejects_bad_shape_and_spot_price():
             surface_to_long_frame(np.ones((1, 1)), [0.25], [100], spot_price)
 
 
+def test_source_grid_preserves_alignment_and_existing_output():
+    args = ([[0.2, np.nan], [0.3, 0.4]], [0.5, 0.25], [110, 100], 100)
+    metadata = ["2026-07-01", "2026-06-01"]
+    baseline = surface_to_long_frame(*args, expiry_datetimes=metadata)
+    frame = surface_to_long_frame(
+        *args, expiry_datetimes=metadata,
+        source_grid=[["call", "missing"], ["put_fallback", "near_atm_average"]],
+    )
+    assert frame.source.tolist() == [
+        "call", "missing", "put_fallback", "near_atm_average"
+    ]
+    pd.testing.assert_frame_equal(frame.drop(columns="source"), baseline)
+    assert "source" not in baseline.columns
+
+
+@pytest.mark.parametrize("sources", ["call", ["call", "put"], [["call"], ["put"]]])
+def test_source_grid_rejects_mismatched_shape(sources):
+    with pytest.raises(ValueError, match="source_grid shape"):
+        surface_to_long_frame([[0.2, 0.3]], [0.25], [90, 110], 100,
+                              source_grid=sources)
+
+
+def test_chart_sources_follow_sorted_cells_and_selected_expiry():
+    frame = surface_to_long_frame(
+        [[0.2, np.nan, 0.22], [0.3, 0.4, 0.35]],
+        [0.5, 0.25], [110, 90, 100], 100,
+        source_grid=[
+            ["call", "missing", "near_atm_call_only"],
+            ["put_fallback", "put", "near_atm_average"],
+        ],
+    ).sample(frac=1, random_state=7)
+    heatmap = make_iv_heatmap(frame).data[0]
+    assert heatmap.customdata.tolist() == [
+        [[90.0, "put"], [100.0, "near_atm_average"], [110.0, "put_fallback"]],
+        [[90.0, "missing"], [100.0, "near_atm_call_only"], [110.0, "call"]],
+    ]
+    assert np.isnan(heatmap.z[1, 0])
+    assert heatmap.z[0].tolist() == [0.4, 0.35, 0.3]
+    smile = make_smile_figure(frame, selected_expiries=[0.5]).data[0]
+    assert smile.customdata.tolist() == heatmap.customdata[1].tolist()
+    assert np.isnan(smile.y[0])
+    assert smile.y[1:].tolist() == [0.22, 0.2]
+    for trace in [heatmap, smile]:
+        assert "source: %{customdata[1]}" in trace.hovertemplate
+        assert "strike: %{customdata[0]:g}" in trace.hovertemplate
+        assert trace.connectgaps is False
+    for figure in [make_iv_heatmap(_long_frame()), make_smile_figure(_long_frame())]:
+        assert all("source:" not in trace.hovertemplate for trace in figure.data)
+
+
 def test_surface_to_long_frame_aligns_and_normalizes_expiry_datetimes():
     surface = np.array([[0.20], [0.25], [np.nan]])
     expiries = [0.5, 0.25, 0.125]

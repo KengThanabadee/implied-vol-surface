@@ -42,9 +42,14 @@ def _normalize_expiry_datetimes(
 
 
 def surface_to_long_frame(
-    iv_surface, expiries, strikes, spot_price, expiry_datetimes=None
+    iv_surface, expiries, strikes, spot_price, expiry_datetimes=None,
+    source_grid=None,
 ) -> pd.DataFrame:
-    """Convert an expiry-by-strike IV grid to chart-ready long-form data."""
+    """Convert an expiry-by-strike IV grid to chart-ready long-form data.
+
+    Optional source_grid labels must align with iv_surface and are preserved
+    unchanged in a source column, including labels for missing IV cells.
+    """
     try:
         surface = np.asarray(iv_surface, dtype=float)
         expiry_values = np.asarray(list(expiries), dtype=float)
@@ -79,6 +84,11 @@ def surface_to_long_frame(
             "moneyness": strike / spot_value,
         }
     )
+    if source_grid is not None:
+        sources = np.asarray(source_grid, dtype=object)
+        if sources.shape != surface.shape:
+            raise ValueError("source_grid shape must equal iv_surface shape")
+        data["source"] = sources.reshape(-1)
     return pd.DataFrame(data)
 
 
