@@ -66,6 +66,24 @@ For development dependencies:
 pip install -e ".[dev]"
 ```
 
+## Offline dashboard
+
+From the repository root:
+
+```bash
+pip install -e ".[dashboard]"
+python -m streamlit run app.py
+```
+
+The dashboard shows the Combined IV heatmap and 3D surface from the checked-in
+Bybit BTC snapshot. Its default `0.80 <= K / S <= 1.20` surface linearly fills
+only interior gaps within each expiry; it does not interpolate across expiry or
+extrapolate beyond observed wings. The Heatmap can switch back to unfilled
+Observed values, and both charts can switch to an extended
+`0.70 <= K / S <= 1.30` range. Hover distinguishes Observed, Interpolated, and
+Missing cells. The sidebar rate is in percent per year, continuously
+compounded; changing it recomputes IV from the same frozen bid/ask quotes.
+
 ## Quick Example
 
 ```python

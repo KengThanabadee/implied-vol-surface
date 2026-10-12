@@ -4,6 +4,11 @@ import pandas as pd
 
 _LONG_FRAME_COLUMNS = {"tau", "strike", "iv", "moneyness"}
 _ATM_TOLERANCE = 1e-12
+_SURFACE_VALUE_TYPES = {
+    "observed": "Observed",
+    "interpolated": "Interpolated",
+    "missing": "Missing",
+}
 
 
 def _require_columns(frame: pd.DataFrame, required: set[str], name: str) -> None:
@@ -90,6 +95,74 @@ def surface_to_long_frame(
             raise ValueError("source_grid shape must equal iv_surface shape")
         data["source"] = sources.reshape(-1)
     return pd.DataFrame(data)
+
+
+def interpolate_smiles_1d(
+    long_frame: pd.DataFrame,
+    min_moneyness: float = 0.8,
+    max_moneyness: float = 1.2,
+) -> pd.DataFrame:
+    """Linearly fill interior IV gaps along moneyness within each expiry.
+
+    The returned frame is restricted to the inclusive moneyness range. Original
+    finite values are retained as Observed, missing cells between the first and
+    last finite value of an expiry are Interpolated, and cells outside that
+    observed support remain Missing. No values are filled across expiries.
+    """
+    _require_columns(long_frame, _LONG_FRAME_COLUMNS, "long_frame")
+
+    try:
+        lower = float(min_moneyness)
+        upper = float(max_moneyness)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("moneyness bounds must be finite with min < max") from exc
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+        raise ValueError("moneyness bounds must be finite with min < max")
+
+    duplicates = long_frame.duplicated(subset=["tau", "moneyness"], keep=False)
+    if duplicates.any():
+        raise ValueError("long_frame must have unique tau and moneyness cells")
+
+    frame = long_frame[
+        long_frame["moneyness"].between(lower, upper, inclusive="both")
+    ].copy()
+    # Use unique internal row labels without changing the caller's index.
+    original_index = frame.index
+    frame = frame.reset_index(drop=True)
+    frame["observed_iv"] = pd.to_numeric(frame["iv"], errors="coerce")
+    frame["surface_value_type"] = _SURFACE_VALUE_TYPES["missing"]
+
+    for _, expiry_frame in frame.groupby("tau", sort=False, dropna=False):
+        ordered = expiry_frame.sort_values("moneyness")
+        x = ordered["moneyness"].to_numpy(dtype=float)
+        observed = ordered["observed_iv"].to_numpy(dtype=float)
+        finite = np.isfinite(x) & np.isfinite(observed)
+
+        frame.loc[ordered.index[finite], "surface_value_type"] = (
+            _SURFACE_VALUE_TYPES["observed"]
+        )
+        if finite.sum() < 2:
+            continue
+
+        interior = (
+            ~finite
+            & np.isfinite(x)
+            & (x >= x[finite].min())
+            & (x <= x[finite].max())
+        )
+        if not interior.any():
+            continue
+
+        target_index = ordered.index[interior]
+        frame.loc[target_index, "iv"] = np.interp(
+            x[interior], x[finite], observed[finite]
+        )
+        frame.loc[target_index, "surface_value_type"] = (
+            _SURFACE_VALUE_TYPES["interpolated"]
+        )
+
+    frame.index = original_index
+    return frame
 
 
 def atm_term_structure_frame(

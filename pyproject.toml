@@ -18,10 +18,12 @@ dependencies = [
 [project.optional-dependencies]
 dashboard = [
     "plotly",
+    "streamlit>=1.40",
 ]
 dev = [
     "pytest",
     "plotly",
+    "streamlit>=1.40",
 ]
 
 [tool.setuptools.packages.find]

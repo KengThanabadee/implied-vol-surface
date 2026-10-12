@@ -8,11 +8,13 @@ import plotly.graph_objects as go
 import pytest
 
 from iv_surface.surface_transforms import (
-    surface_to_long_frame,
     atm_term_structure_frame,
+    interpolate_smiles_1d,
+    surface_to_long_frame,
 )
 from iv_surface.visualization import (
     make_iv_heatmap,
+    make_iv_surface_figure,
     make_smile_figure,
     make_atm_term_structure_figure,
 )
@@ -41,10 +43,12 @@ class BlockPlotly(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockPlotly())
 from iv_surface.surface_transforms import (
     atm_term_structure_frame,
+    interpolate_smiles_1d,
     surface_to_long_frame,
 )
 
 frame = surface_to_long_frame([[0.2]], [0.25], [100], 100)
+interpolate_smiles_1d(frame)
 atm_term_structure_frame(frame)
 """
     subprocess.run([sys.executable, "-c", script], check=True)
@@ -96,6 +100,94 @@ def test_source_grid_rejects_mismatched_shape(sources):
     with pytest.raises(ValueError, match="source_grid shape"):
         surface_to_long_frame([[0.2, 0.3]], [0.25], [90, 110], 100,
                               source_grid=sources)
+
+
+def test_interpolate_smiles_1d_fills_only_interior_gaps_per_expiry():
+    frame = pd.DataFrame(
+        {
+            "tau": [0.25] * 5 + [0.5] * 5,
+            "strike": [80, 90, 100, 110, 120] * 2,
+            "moneyness": [0.8, 0.9, 1.0, 1.1, 1.2] * 2,
+            "iv": [np.nan, 0.30, np.nan, 0.50, np.nan,
+                   np.nan, np.nan, 0.40, np.nan, np.nan],
+            "source": ["missing", "put", "missing", "call", "missing"] * 2,
+        }
+    )
+
+    result = interpolate_smiles_1d(frame)
+
+    near = result[result["tau"] == 0.25].sort_values("moneyness")
+    far = result[result["tau"] == 0.5].sort_values("moneyness")
+    assert np.isnan(near["iv"].iloc[0])
+    assert near["iv"].iloc[2] == pytest.approx(0.40)
+    assert np.isnan(near["iv"].iloc[4])
+    assert near["surface_value_type"].tolist() == [
+        "Missing", "Observed", "Interpolated", "Observed", "Missing"
+    ]
+    assert near["observed_iv"].iloc[1] == 0.30
+    assert np.isnan(near["observed_iv"].iloc[2])
+    assert near["observed_iv"].iloc[3] == 0.50
+    assert near["source"].tolist() == frame.iloc[:5]["source"].tolist()
+    assert np.isnan(far["iv"].iloc[[0, 1, 3, 4]]).all()
+    assert far["surface_value_type"].tolist() == [
+        "Missing", "Missing", "Observed", "Missing", "Missing"
+    ]
+
+
+def test_interpolate_smiles_1d_handles_duplicate_row_indices():
+    near = surface_to_long_frame(
+        [[np.nan, 0.30, np.nan, 0.50, np.nan]],
+        [0.25], [80, 90, 100, 110, 120], 100,
+        source_grid=[["missing", "put", "missing", "call", "missing"]],
+    )
+    far = surface_to_long_frame(
+        [[np.nan, np.nan, 0.70, np.nan, np.nan]],
+        [0.5], [80, 90, 100, 110, 120], 100,
+        source_grid=[["missing", "missing", "near_atm_average", "missing", "missing"]],
+    )
+    frame = pd.concat([near, far]).sample(frac=1, random_state=7)
+    frame.index.name = "input_row"
+    original = frame.copy(deep=True)
+    assert not frame.index.is_unique
+
+    result = interpolate_smiles_1d(frame)
+
+    pd.testing.assert_index_equal(result.index, original.index)
+    pd.testing.assert_frame_equal(frame, original)
+    pd.testing.assert_frame_equal(
+        result.drop(columns=["iv", "observed_iv", "surface_value_type"]),
+        original.drop(columns="iv"),
+    )
+    pd.testing.assert_series_equal(
+        result["observed_iv"], original["iv"], check_names=False,
+    )
+    near_result = result[result["tau"] == 0.25].sort_values("moneyness")
+    far_result = result[result["tau"] == 0.5].sort_values("moneyness")
+    np.testing.assert_allclose(
+        near_result["iv"], [np.nan, 0.30, 0.40, 0.50, np.nan], equal_nan=True,
+    )
+    np.testing.assert_allclose(
+        far_result["iv"], [np.nan, np.nan, 0.70, np.nan, np.nan], equal_nan=True,
+    )
+    assert near_result["surface_value_type"].tolist() == [
+        "Missing", "Observed", "Interpolated", "Observed", "Missing"
+    ]
+    assert far_result["surface_value_type"].tolist() == [
+        "Missing", "Missing", "Observed", "Missing", "Missing"
+    ]
+
+
+def test_interpolate_smiles_1d_clips_range_and_rejects_ambiguous_inputs():
+    result = interpolate_smiles_1d(_long_frame(), 0.95, 1.2)
+    assert result["moneyness"].tolist() == [1.1, 1.1]
+
+    for bounds in [(1.0, 1.0), (1.1, 1.0), (np.nan, 1.0)]:
+        with pytest.raises(ValueError, match="moneyness bounds"):
+            interpolate_smiles_1d(_long_frame(), *bounds)
+
+    duplicate = pd.concat([_long_frame(), _long_frame().iloc[[0]]])
+    with pytest.raises(ValueError, match="unique tau and moneyness"):
+        interpolate_smiles_1d(duplicate)
 
 
 def test_chart_sources_follow_sorted_cells_and_selected_expiry():
@@ -348,6 +440,102 @@ def test_make_iv_heatmap_sorts_grid_keeps_nan_and_strike_hover():
     assert "strike" in trace.hovertemplate
     assert figure.layout.xaxis.title.text == "K / S"
     assert figure.layout.yaxis.title.text == "tau (years)"
+
+
+def test_surface_heatmap_uses_equal_expiry_rows_and_value_type_hover():
+    frame = interpolate_smiles_1d(
+        surface_to_long_frame(
+            [[0.30, np.nan, 0.50], [0.25, 0.35, 0.45]],
+            [0.25, 0.5],
+            [90, 100, 110],
+            100,
+            expiry_datetimes=["2026-06-01", "2026-09-01"],
+            source_grid=[
+                ["put", "missing", "call"],
+                ["put", "near_atm_average", "call"],
+            ],
+        )
+    )
+
+    figure = make_iv_heatmap(frame, equal_expiry_spacing=True)
+    trace = figure.data[0]
+    assert list(trace.y) == ["2026-06-01", "2026-09-01"]
+    assert figure.layout.yaxis.title.text == "Expiry"
+    assert figure.layout.yaxis.type == "category"
+    assert list(figure.layout.yaxis.categoryarray) == [
+        "2026-06-01", "2026-09-01"
+    ]
+    assert np.asarray(trace.z)[0].tolist() == pytest.approx([0.30, 0.40, 0.50])
+    assert trace.customdata[0][1].tolist() == [
+        100.0, "1D interpolation within expiry", "Interpolated"
+    ]
+    assert "Surface value: %{customdata[2]}" in trace.hovertemplate
+    assert "Value source: %{customdata[1]}" in trace.hovertemplate
+    surface = make_iv_surface_figure(frame).data[0]
+    assert surface.customdata.tolist() == trace.customdata.tolist()
+    assert "Value source: %{customdata[1]}" in surface.hovertemplate
+    # Display provenance changes must not rewrite the original quote provenance.
+    assert frame.loc[frame["surface_value_type"].eq("Interpolated"), "source"].tolist() == [
+        "missing"
+    ]
+    assert trace.customdata[0][0].tolist() == [90.0, "put", "Observed"]
+
+    observed_frame = frame.copy()
+    observed_frame["iv"] = observed_frame["observed_iv"]
+    observed_frame["surface_value_type"] = np.where(
+        np.isfinite(observed_frame["observed_iv"]), "Observed", "Missing"
+    )
+    observed_heatmap = make_iv_heatmap(observed_frame).data[0]
+    assert observed_heatmap.customdata[0][1].tolist() == [
+        100.0, "missing", "Missing"
+    ]
+
+
+def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
+    frame = interpolate_smiles_1d(
+        surface_to_long_frame(
+            [[0.30, np.nan, 0.50], [0.25, 0.35, 0.45]],
+            [0.25, 0.5], [90, 100, 110], 100,
+            expiry_datetimes=["2026-06-01", "2026-09-01"],
+        )
+    )
+    heatmap = make_iv_heatmap(frame, equal_expiry_spacing=True).data[0]
+    surface = make_iv_surface_figure(frame)
+    trace = surface.data[0]
+    observed = surface.data[1]
+
+    assert isinstance(trace, go.Surface)
+    assert isinstance(observed, go.Scatter3d)
+    assert trace.y.tolist() == [0.25, 0.5]
+    assert np.asarray(trace.z).tolist() == np.asarray(heatmap.z).tolist()
+    assert trace.connectgaps is False
+    assert list(surface.layout.scene.yaxis.ticktext) == [
+        "2026-06-01", "2026-09-01"
+    ]
+    assert surface.layout.scene.aspectratio.x == 1.7
+    assert surface.layout.scene.aspectratio.y == 1.2
+    assert surface.layout.scene.aspectratio.z == 0.72
+    assert surface.layout.scene.dragmode == "turntable"
+    assert surface.layout.height == 700
+    assert trace.colorbar.thickness == 18
+    assert trace.colorbar.len == 0.72
+    assert trace.lighting.ambient == 0.78
+    assert "Surface value" in trace.hovertemplate
+    assert observed.name == "Observed IV"
+    assert observed.z.tolist() != pytest.approx(
+        [0.30, 0.50, 0.25, 0.35, 0.45]
+    )
+    assert np.asarray(observed.customdata)[:, 1].astype(float).tolist() == (
+        pytest.approx([0.30, 0.50, 0.25, 0.35, 0.45])
+    )
+    assert np.all(
+        np.asarray(observed.z, dtype=float)
+        > np.asarray(observed.customdata)[:, 1].astype(float)
+    )
+    assert observed.marker.size == 5
+    assert observed.marker.color == "#F97316"
+    assert "Observed Combined IV" in observed.hovertemplate
+    assert "customdata[1]" in observed.hovertemplate
 
 
 def test_make_smile_figure_filters_and_sorts_without_changing_iv_values():
