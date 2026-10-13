@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import subprocess
 import sys
 
@@ -9,6 +10,7 @@ import pytest
 
 from iv_surface.surface_transforms import (
     atm_term_structure_frame,
+    interpolate_surface_2d,
     interpolate_smiles_1d,
     surface_to_long_frame,
 )
@@ -43,12 +45,14 @@ class BlockPlotly(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockPlotly())
 from iv_surface.surface_transforms import (
     atm_term_structure_frame,
+    interpolate_surface_2d,
     interpolate_smiles_1d,
     surface_to_long_frame,
 )
 
 frame = surface_to_long_frame([[0.2]], [0.25], [100], 100)
 interpolate_smiles_1d(frame)
+interpolate_surface_2d(frame)
 atm_term_structure_frame(frame)
 """
     subprocess.run([sys.executable, "-c", script], check=True)
@@ -473,7 +477,9 @@ def test_surface_heatmap_uses_equal_expiry_rows_and_value_type_hover():
     assert "Value source: %{customdata[1]}" in trace.hovertemplate
     surface = make_iv_surface_figure(frame).data[0]
     assert surface.customdata.tolist() == trace.customdata.tolist()
-    assert "Value source: %{customdata[1]}" in surface.hovertemplate
+    assert surface.hovertemplate is None
+    assert surface.hoverinfo == "text"
+    assert "Value source: 1D interpolation within expiry" in surface.text[0][1]
     # Display provenance changes must not rewrite the original quote provenance.
     assert frame.loc[frame["surface_value_type"].eq("Interpolated"), "source"].tolist() == [
         "missing"
@@ -516,11 +522,11 @@ def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
     assert surface.layout.scene.aspectratio.y == 1.2
     assert surface.layout.scene.aspectratio.z == 0.72
     assert surface.layout.scene.dragmode == "turntable"
-    assert surface.layout.height == 700
+    assert surface.layout.height == 500
     assert trace.colorbar.thickness == 18
     assert trace.colorbar.len == 0.72
     assert trace.lighting.ambient == 0.78
-    assert "Surface value" in trace.hovertemplate
+    assert "Surface value: Interpolated" in trace.text[0][1]
     assert observed.name == "Observed IV"
     assert observed.z.tolist() != pytest.approx(
         [0.30, 0.50, 0.25, 0.35, 0.45]
@@ -536,6 +542,28 @@ def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
     assert observed.marker.color == "#F97316"
     assert "Observed Combined IV" in observed.hovertemplate
     assert "customdata[1]" in observed.hovertemplate
+
+
+def test_surface_hover_text_is_aligned_on_a_nonsquare_grid():
+    frame = surface_to_long_frame(
+        [[.21, .22, .23, .24], [.31, .32, .33, .34]],
+        [.5, .25], [110, 90, 100, 120], 100,
+        source_grid=[["call", "put", "near_atm_average", "call_fallback"],
+                     ["call", "put", "near_atm_put_only", "call"]],
+    ).sample(frac=1, random_state=4)
+    trace = make_iv_surface_figure(frame).data[0]
+    assert np.asarray(trace.text).shape == (2, 4)
+    assert "strike: 90<br>Combined source: put" in trace.text[0][0]
+    assert "strike: 120<br>Combined source: call" in trace.text[0][3]
+    assert "strike: 120<br>Combined source: call_fallback" in trace.text[1][3]
+    assert "tau: 0.2500 years" in trace.text[0][3]
+    assert "IV: 34.00%" in trace.text[0][3]
+    assert trace.hovertemplate is None
+    assert trace.hoverinfo == "text"
+    serialized = json.loads(trace.to_json())
+    assert len(serialized["text"]) == 2
+    assert len(serialized["text"][0]) == 4
+    assert "strike: 120" in serialized["text"][1][3]
 
 
 def test_make_smile_figure_filters_and_sorts_without_changing_iv_values():

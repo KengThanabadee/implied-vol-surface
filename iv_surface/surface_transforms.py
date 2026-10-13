@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import QhullError
 
 
 _LONG_FRAME_COLUMNS = {"tau", "strike", "iv", "moneyness"}
@@ -163,6 +165,87 @@ def interpolate_smiles_1d(
 
     frame.index = original_index
     return frame
+
+
+def interpolate_surface_2d(
+    long_frame: pd.DataFrame,
+    min_moneyness: float = 0.8,
+    max_moneyness: float = 1.2,
+) -> pd.DataFrame:
+    """Fill existing missing cells by piecewise-linear total variance in 2D.
+
+    Restrict both support and targets to the inclusive display range. Use only
+    original finite IV (observed_iv when present), interpolate w = IV**2 * tau
+    on (K/S, tau), then recover IV = sqrt(w/tau). Both coordinate axes are
+    independently scaled to the observed min/max range before triangulation.
+
+    Observations, quote provenance, metadata, row order and index are preserved.
+    Outside the observed convex hull, or without non-collinear 2D support,
+    missing cells remain NaN. This operation creates no additional grid cells.
+    """
+    _require_columns(long_frame, _LONG_FRAME_COLUMNS, "long_frame")
+    try:
+        lower, upper = float(min_moneyness), float(max_moneyness)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("moneyness bounds must be finite with min < max") from exc
+    if not np.isfinite([lower, upper]).all() or lower >= upper:
+        raise ValueError("moneyness bounds must be finite with min < max")
+
+    coordinates = long_frame[["moneyness", "tau"]].to_numpy(dtype=float)
+    if not np.isfinite(coordinates).all() or (coordinates <= 0).any():
+        raise ValueError("moneyness and tau must be finite and positive")
+    if long_frame.duplicated(["tau", "moneyness"]).any():
+        raise ValueError("long_frame must have unique tau and moneyness cells")
+
+    frame = long_frame[long_frame.moneyness.between(lower, upper)].copy()
+    original_index = frame.index
+    frame = frame.reset_index(drop=True)
+    observed_column = "observed_iv" if "observed_iv" in frame else "iv"
+    observed = frame[observed_column].to_numpy(dtype=float)
+    finite = np.isfinite(observed)
+    if (observed[finite] < 0).any():
+        raise ValueError("observed IV must be non-negative")
+    observed = np.where(finite, observed, np.nan)
+    frame["observed_iv"] = observed
+    frame["iv"] = observed
+    frame["surface_value_type"] = np.where(finite, "Observed", "Missing")
+    frame["interpolation_method"] = pd.Series(None, index=frame.index, dtype=object)
+
+    def finish():
+        frame.index = original_index
+        return frame
+
+    if finite.sum() < 3 or finite.all():
+        return finish()
+
+    points = frame[["moneyness", "tau"]].to_numpy(dtype=float)
+    support = points[finite]
+    shift = support.min(axis=0)
+    scale = np.ptp(support, axis=0)
+    if (scale == 0).any():
+        return finish()
+    support = (support - shift) / scale
+    if np.linalg.matrix_rank(support - support[0]) < 2:
+        return finish()
+    total_variance = observed[finite] ** 2 * points[finite, 1]
+    if not np.isfinite(total_variance).all():
+        raise ValueError("observed total variance must be finite")
+    try:
+        interpolator = LinearNDInterpolator(support, total_variance)
+    except QhullError:
+        # Degenerate support cannot define a stable 2D triangulation.
+        return finish()
+    targets = np.flatnonzero(~finite)
+    variance = interpolator((points[targets] - shift) / scale)
+    supported = np.isfinite(variance) & (variance >= 0)
+    targets = targets[supported]
+    recovered = np.sqrt(variance[supported] / points[targets, 1])
+    valid = np.isfinite(recovered)
+    targets = targets[valid]
+    frame.loc[targets, "iv"] = recovered[valid]
+    frame.loc[targets, "surface_value_type"] = "Interpolated"
+    frame.loc[targets, "interpolation_method"] = "2D linear total variance"
+    return finish()
 
 
 def atm_term_structure_frame(

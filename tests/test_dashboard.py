@@ -43,7 +43,7 @@ def test_dashboard_renders_grid_and_recalculates_rate(monkeypatch):
     assert app.radio[1].value == "Surface"
     assert [tab.label for tab in app.tabs] == ["Heatmap", "3D surface"]
     assert any(
-        "211 observed · 150 interpolated · 39 blank" in caption.value
+        "211 observed · 163 interpolated · 26 blank" in caption.value
         for caption in app.caption
     )
     assert any("Frozen snapshot" in caption.value for caption in app.caption)
@@ -55,7 +55,7 @@ def test_dashboard_renders_grid_and_recalculates_rate(monkeypatch):
     app.radio[0].set_value("Extended (0.7–1.3)").run()
     assert not app.exception
     assert any(
-        "253 observed · 192 interpolated · 95 blank" in caption.value
+        "253 observed · 231 interpolated · 56 blank" in caption.value
         for caption in app.caption
     )
 

@@ -1,3 +1,5 @@
+from html import escape
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -71,18 +73,28 @@ def _heatmap_customdata(long_frame, iv_grid, strike_grid):
     source_hover = ""
     value_type_hover = ""
 
-    has_source = "source" in long_frame.columns
+    has_source = (
+        "source" in long_frame.columns or "interpolation_method" in long_frame.columns
+    )
     has_value_type = "surface_value_type" in long_frame.columns
     if not has_source and not has_value_type:
         return customdata, strike_hover, source_hover, value_type_hover
 
     fields = [customdata]
     if has_source:
-        display_source = long_frame["source"].copy()
+        display_source = (
+            long_frame["source"].copy()
+            if "source" in long_frame.columns
+            else pd.Series("Observed IV", index=long_frame.index).mask(
+                long_frame["surface_value_type"].eq("Missing"), "missing"
+            )
+        )
         if has_value_type:
             display_source = display_source.mask(
                 long_frame["surface_value_type"].eq("Interpolated"),
-                "1D interpolation within expiry",
+                long_frame["interpolation_method"]
+                if "interpolation_method" in long_frame.columns
+                else "1D interpolation within expiry",
             )
         source_grid = long_frame.assign(source=display_source).pivot(
             index="tau", columns="moneyness", values="source"
@@ -196,19 +208,44 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
         _heatmap_customdata(long_frame, iv_grid, strike_grid)
     )
     visible_taus = _spaced_tau_ticks(iv_grid.index)
+    # Surface hover handles its native 2D text grid reliably. Keep customdata
+    # for inspection, but avoid renderer-dependent compound-array indexing.
+    hover_text = []
+    for row_index, row in enumerate(customdata):
+        text_row = []
+        for column_index, cell in enumerate(row):
+            values = cell if customdata.ndim == 3 else [cell]
+            parts = [
+                f"K / S: {iv_grid.columns[column_index]:.4f}",
+                f"tau: {iv_grid.index[row_index]:.4f} years",
+                f"strike: {values[0]:g}",
+            ]
+            field = 1
+            if source_hover:
+                label = "Value source" if value_type_hover else "Combined source"
+                parts.append(f"{label}: {escape(str(values[field]))}")
+                field += 1
+            if value_type_hover:
+                parts.append(f"Surface value: {escape(str(values[field]))}")
+            parts.append(f"IV: {iv_grid.iloc[row_index, column_index]:.2%}")
+            text_row.append("<br>".join(parts))
+        hover_text.append(text_row)
     trace = go.Surface(
         x=iv_grid.columns.to_numpy(dtype=float),
         y=iv_grid.index.to_numpy(dtype=float),
         z=iv_grid.to_numpy(dtype=float),
         customdata=customdata,
+        # Plotly's text validator stringifies nested Python lists row-by-row;
+        # a 2D object array retains the per-cell shape through serialization.
+        text=np.asarray(hover_text, dtype=object),
         connectgaps=False,
         colorscale="Viridis",
         colorbar={
-            "title": {"text": "Implied volatility", "side": "right"},
+            "title": {"text": "IV", "side": "top"},
             "tickformat": ".0%",
             "len": 0.72,
             "thickness": 18,
-            "x": 0.96,
+            "x": 0.91,
             "y": 0.52,
         },
         lighting={
@@ -222,14 +259,9 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
         opacity=0.98,
         name="Interpolated surface",
         showlegend=False,
-        hovertemplate=(
-            "K / S: %{x:.4f}<br>"
-            "tau: %{y:.4f} years<br>"
-            + strike_hover
-            + source_hover
-            + value_type_hover
-            + "IV: %{z:.2%}<extra></extra>"
-        ),
+        # Native surface text lookup is row/column aware; hovertemplate's generic
+        # array lookup can invert these indices, including for the text token.
+        hoverinfo="text",
     )
     figure = go.Figure(data=[trace])
     observed_column = (
@@ -294,22 +326,25 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
     }
     figure.update_layout(
         scene={
+            "domain": {"x": [0, 0.86]},
             "bgcolor": "rgba(0, 0, 0, 0)",
             "xaxis": {"title": "K / S", **axis_style},
             "yaxis": {
-                "title": "Expiry (tau)",
+                "title": "Expiry",
                 "tickmode": "array",
                 "tickvals": visible_taus,
                 "ticktext": _expiry_labels(long_frame, visible_taus),
                 **axis_style,
             },
             "zaxis": {
-                "title": "Implied volatility",
+                # The IV colorbar and percentage ticks identify this axis;
+                # omitting the duplicate title avoids edge clipping on rotation.
+                "title": "",
                 "tickformat": ".0%",
                 **axis_style,
             },
             "camera": {
-                "eye": {"x": 1.32, "y": -1.48, "z": 0.78},
+                "eye": {"x": 2.0, "y": -2.24, "z": 1.22},
                 "center": {"x": 0, "y": 0, "z": -0.06},
             },
             "aspectmode": "manual",
@@ -317,8 +352,8 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "dragmode": "turntable",
         },
         autosize=True,
-        height=700,
-        margin={"l": 0, "r": 36, "t": 8, "b": 0},
+        height=500,
+        margin={"l": 12, "r": 12, "t": 24, "b": 24},
         paper_bgcolor="rgba(0, 0, 0, 0)",
         legend={
             "orientation": "h",
@@ -328,7 +363,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "yanchor": "top",
             "bgcolor": "rgba(0, 0, 0, 0)",
         },
-        uirevision="iv-surface-camera",
+        uirevision="iv-surface-camera-v4",
     )
     return figure
 

@@ -9,7 +9,7 @@ import streamlit as st
 from iv_surface.fetcher import load_chain_snapshot, parse_chain_snapshot
 from iv_surface.surface_builder import build_combined_surface_from_chain
 from iv_surface.surface_transforms import (
-    interpolate_smiles_1d,
+    interpolate_surface_2d,
     surface_to_long_frame,
 )
 from iv_surface.visualization import make_iv_heatmap, make_iv_surface_figure
@@ -111,7 +111,7 @@ def main():
         ),
     )
     min_moneyness, max_moneyness = MONEYNESS_RANGES[range_name]
-    surface_frame = interpolate_smiles_1d(
+    surface_frame = interpolate_surface_2d(
         frame,
         min_moneyness=min_moneyness,
         max_moneyness=max_moneyness,
@@ -128,9 +128,22 @@ def main():
         f"{surface_counts.get('Interpolated', 0):,} interpolated · "
         f"{surface_counts.get('Missing', 0):,} blank. "
         f"Displayed K / S: {min_moneyness:.1f}–{max_moneyness:.1f}. "
-        "Interpolation is linear within each expiry only; wings are not "
-        "extrapolated."
+        "2D linear total-variance interpolation across K / S and tau; "
+        "only inside the observed data boundary."
     )
+    with st.expander("How the surface is filled"):
+        st.write(
+            "Convert observed IV to total variance (IV² × tau), linearly "
+            "interpolate it between observations, then convert back to IV. "
+            "K / S and tau are each scaled to their observed range for "
+            "triangulation. Original IV points stay unchanged."
+        )
+        st.write(
+            "The existing grid is filled only inside the convex hull of "
+            "observations in the selected range. A cell can be filled across "
+            "expiries, but cells outside that boundary stay blank. "
+            "A denser grid would add display points, not market observations."
+        )
 
     heatmap_tab, surface_tab = st.tabs(["Heatmap", "3D surface"])
     with heatmap_tab:
@@ -139,7 +152,7 @@ def main():
             ["Surface", "Observed"],
             horizontal=True,
             help=(
-                "Surface fills only interior gaps within each expiry. Observed "
+                "Surface uses 2D total-variance interpolation. Observed "
                 "shows solved market IV without interpolation."
             ),
         )

@@ -76,12 +76,22 @@ python -m streamlit run app.py
 ```
 
 The dashboard shows the Combined IV heatmap and 3D surface from the checked-in
-Bybit BTC snapshot. Its default `0.80 <= K / S <= 1.20` surface linearly fills
-only interior gaps within each expiry; it does not interpolate across expiry or
-extrapolate beyond observed wings. The Heatmap can switch back to unfilled
+Bybit BTC snapshot. Its default `0.80 <= K / S <= 1.20` surface fills missing
+grid cells with 2D piecewise-linear total-variance interpolation. It converts
+observed IV to `w = IV² × tau`, interpolates across spot moneyness and numerical
+`tau`, then converts back with `IV = sqrt(w / tau)`. Both axes are scaled to
+their observed min/max ranges before triangulation. Support uses only original
+finite observations inside the selected display range; observed values stay
+unchanged and cells outside their convex hull remain missing. The Heatmap can switch back to unfilled
 Observed values, and both charts can switch to an extended
 `0.70 <= K / S <= 1.30` range. Hover distinguishes Observed, Interpolated, and
-Missing cells. The sidebar rate is in percent per year, continuously
+Missing cells, with `2D linear total variance` as the interpolated value source.
+`interpolate_surface_2d()` in `surface_transforms.py` performs this operation
+independently of the UI and retains original IV in `observed_iv`, quote
+provenance in `source`, and the display method in `interpolation_method`.
+Fewer than three non-collinear observations leave missing cells unfilled.
+This fills the existing grid rather than adding dense display points.
+The sidebar rate is in percent per year, continuously
 compounded; changing it recomputes IV from the same frozen bid/ask quotes.
 
 ## Quick Example
