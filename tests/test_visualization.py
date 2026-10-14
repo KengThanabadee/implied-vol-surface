@@ -516,13 +516,13 @@ def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
     assert np.asarray(trace.z).tolist() == np.asarray(heatmap.z).tolist()
     assert trace.connectgaps is False
     assert list(surface.layout.scene.yaxis.ticktext) == [
-        "2026-06-01", "2026-09-01"
+        "2026<br>06-01", "2026<br>09-01"
     ]
     assert surface.layout.scene.aspectratio.x == 1.7
     assert surface.layout.scene.aspectratio.y == 1.2
     assert surface.layout.scene.aspectratio.z == 0.72
     assert surface.layout.scene.dragmode == "turntable"
-    assert surface.layout.height == 500
+    assert surface.layout.height == 640
     assert trace.colorbar.thickness == 18
     assert trace.colorbar.len == 0.72
     assert trace.lighting.ambient == 0.78
@@ -538,7 +538,7 @@ def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
         np.asarray(observed.z, dtype=float)
         > np.asarray(observed.customdata)[:, 1].astype(float)
     )
-    assert observed.marker.size == 5
+    assert observed.marker.size == 3
     assert observed.marker.color == "#F97316"
     assert "Observed Combined IV" in observed.hovertemplate
     assert "customdata[1]" in observed.hovertemplate
@@ -589,6 +589,31 @@ def test_make_smile_figure_orders_all_expiries_ascending():
 
     assert [trace.name for trace in figure.data] == ["tau=0.25", "tau=0.5"]
     assert all(trace.connectgaps is False for trace in figure.data)
+
+
+def test_smile_axis_fits_selected_observations_without_removing_gaps():
+    frame = surface_to_long_frame(
+        [[np.nan, .4, np.nan, .5, np.nan], [.6, np.nan, np.nan, np.nan, .7]],
+        [.25, .5], [10, 90, 100, 110, 400], 100,
+    )
+    figure = make_smile_figure(frame, selected_expiries=[.25])
+    assert list(figure.layout.xaxis.range) == pytest.approx([.89, 1.11])
+    assert len(figure.data[0].x) == 5
+    np.testing.assert_allclose(figure.data[0].y, frame.iloc[:5]["iv"], equal_nan=True)
+    assert figure.data[0].connectgaps is False
+    assert figure.layout.legend.orientation == "h"
+    assert figure.layout.height == 430
+    all_expiries = make_smile_figure(frame)
+    selected_later = make_smile_figure(frame, selected_expiries=[.5])
+    assert selected_later.data[0].line.color == all_expiries.data[1].line.color
+
+
+@pytest.mark.parametrize("values", [[np.nan, np.nan], [.4, np.nan]])
+def test_smile_axis_handles_missing_or_single_observation(values):
+    frame = surface_to_long_frame([values], [.25], [100, 400], 100)
+    figure = make_smile_figure(frame)
+    expected = [.8, 1.2] if np.isnan(values).all() else [.99, 1.01]
+    assert list(figure.layout.xaxis.range) == pytest.approx(expected)
 
 
 def test_make_atm_term_structure_figure_keeps_gap_and_hover_fields():

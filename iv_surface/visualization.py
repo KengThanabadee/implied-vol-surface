@@ -159,7 +159,12 @@ def make_iv_heatmap(
         connectgaps=False,
         xgap=1,
         ygap=1,
-        colorbar={"title": "implied volatility", "tickformat": ".0%"},
+        colorbar={
+            "title": {"text": "IV", "side": "top"},
+            "tickformat": ".0%",
+            "thickness": 14,
+            "xpad": 8,
+        },
         hovertemplate=(
             "K / S: %{x:.4f}<br>"
             + expiry_hover
@@ -175,6 +180,8 @@ def make_iv_heatmap(
         xaxis_title="K / S",
         yaxis_title="Expiry" if equal_expiry_spacing else "tau (years)",
         plot_bgcolor="rgba(128, 128, 128, 0.18)",
+        height=430,
+        margin={"l": 12, "r": 12, "t": 24, "b": 12},
     )
     if equal_expiry_spacing:
         figure.update_yaxes(
@@ -245,7 +252,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "tickformat": ".0%",
             "len": 0.72,
             "thickness": 18,
-            "x": 0.91,
+            "x": 1.02,
             "y": 0.52,
         },
         lighting={
@@ -299,12 +306,12 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
                 mode="markers",
                 name="Observed IV",
                 marker={
-                    "size": 5,
+                    "size": 3,
                     "color": "#F97316",
                     "opacity": 1,
                     "line": {
                         "color": "rgba(15, 23, 42, 0.85)",
-                        "width": 0.8,
+                        "width": 0.4,
                     },
                 },
                 hovertemplate=(
@@ -323,17 +330,21 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
         "gridcolor": "rgba(148, 163, 184, 0.18)",
         "zeroline": False,
         "showspikes": False,
+        "tickfont": {"size": 11},
     }
     figure.update_layout(
         scene={
-            "domain": {"x": [0, 0.86]},
+            "domain": {"x": [0, 1]},
             "bgcolor": "rgba(0, 0, 0, 0)",
-            "xaxis": {"title": "K / S", **axis_style},
+            "xaxis": {"title": {"text": "K / S", "font": {"size": 12}}, **axis_style},
             "yaxis": {
-                "title": "Expiry",
+                "title": {"text": "Expiry", "font": {"size": 12}},
                 "tickmode": "array",
                 "tickvals": visible_taus,
-                "ticktext": _expiry_labels(long_frame, visible_taus),
+                "ticktext": [
+                    label.replace("-", "<br>", 1)
+                    for label in _expiry_labels(long_frame, visible_taus)
+                ],
                 **axis_style,
             },
             "zaxis": {
@@ -344,7 +355,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
                 **axis_style,
             },
             "camera": {
-                "eye": {"x": 2.0, "y": -2.24, "z": 1.22},
+                "eye": {"x": 1.9, "y": 1.9, "z": 0.56},
                 "center": {"x": 0, "y": 0, "z": -0.06},
             },
             "aspectmode": "manual",
@@ -352,8 +363,8 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "dragmode": "turntable",
         },
         autosize=True,
-        height=500,
-        margin={"l": 12, "r": 12, "t": 24, "b": 24},
+        height=640,
+        margin={"l": 20, "r": 12, "t": 24, "b": 24},
         paper_bgcolor="rgba(0, 0, 0, 0)",
         legend={
             "orientation": "h",
@@ -363,7 +374,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "yanchor": "top",
             "bgcolor": "rgba(0, 0, 0, 0)",
         },
-        uirevision="iv-surface-camera-v4",
+        uirevision="iv-surface-camera-v15",
     )
     return figure
 
@@ -376,10 +387,18 @@ def make_smile_figure(
 
     selected = None if selected_expiries is None else set(selected_expiries)
     figure = go.Figure()
-    for tau in sorted(long_frame["tau"].dropna().unique()):
+    observed_moneyness = []
+    colors = [
+        "#38BDF8", "#FB923C", "#C084FC", "#34D399", "#F472B6",
+        "#FACC15", "#818CF8", "#2DD4BF", "#F87171", "#A3E635",
+    ]
+    for expiry_index, tau in enumerate(sorted(long_frame["tau"].dropna().unique())):
         if selected is not None and tau not in selected:
             continue
         smile = long_frame[long_frame["tau"] == tau].sort_values("moneyness")
+        observed_moneyness.extend(
+            smile.loc[np.isfinite(smile["iv"]), "moneyness"].to_numpy(dtype=float)
+        )
         expiry_label = _expiry_labels(long_frame, [tau])[0]
         customdata = smile["strike"].to_numpy(dtype=float)
         strike_hover = "strike: %{customdata:g}<br>"
@@ -394,6 +413,8 @@ def make_smile_figure(
                 y=smile["iv"].to_numpy(dtype=float),
                 customdata=customdata,
                 mode="lines+markers",
+                line=dict(width=2, color=colors[expiry_index % len(colors)]),
+                marker=dict(size=5),
                 name=expiry_label,
                 meta=tau,
                 connectgaps=False,
@@ -407,9 +428,23 @@ def make_smile_figure(
             )
         )
 
-    figure.add_vline(x=1.0, line_dash="dash", line_color="gray")
-    figure.update_layout(xaxis_title="K / S", yaxis_title="implied volatility")
-    figure.update_yaxes(tickformat=".0%")
+    if observed_moneyness:
+        lower, upper = min(observed_moneyness), max(observed_moneyness)
+        padding = max((upper - lower) * 0.05, 0.01)
+        x_range = [lower - padding, upper + padding]
+    else:
+        x_range = [0.8, 1.2]
+    figure.add_vline(x=1.0, line_dash="dot", line_color="gray", line_width=1)
+    figure.update_layout(
+        xaxis_title="Moneyness (K / S)",
+        yaxis_title="IV",
+        height=430,
+        margin=dict(l=12, r=12, t=65, b=12),
+        legend=dict(orientation="h", x=0, y=1.02, xanchor="left", yanchor="bottom"),
+        hovermode="closest",
+    )
+    figure.update_xaxes(range=x_range, tickformat=".2f", zeroline=False)
+    figure.update_yaxes(tickformat=".0%", zeroline=False)
     return figure
 
 

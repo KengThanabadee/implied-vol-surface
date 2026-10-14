@@ -12,7 +12,11 @@ from iv_surface.surface_transforms import (
     interpolate_surface_2d,
     surface_to_long_frame,
 )
-from iv_surface.visualization import make_iv_heatmap, make_iv_surface_figure
+from iv_surface.visualization import (
+    make_iv_heatmap,
+    make_iv_surface_figure,
+    make_smile_figure,
+)
 
 
 SNAPSHOT_PATH = (
@@ -26,6 +30,10 @@ MONEYNESS_RANGES = {
 
 def main():
     st.set_page_config(page_title="BTC volatility", layout="wide")
+    st.markdown(
+        "<style>.stMainBlockContainer {padding-top: 2rem; padding-bottom: 1rem;}</style>",
+        unsafe_allow_html=True,
+    )
     st.title("BTC volatility")
     rate_percent = st.sidebar.number_input(
         "Risk-free rate (% p.a., continuously compounded)",
@@ -71,11 +79,6 @@ def main():
         f"Shared spot: **${result.spot_price:,.2f}** · "
         f"Risk-free rate: **{rate_percent:.2f}% p.a.**, continuously compounded"
     )
-    st.subheader("Combined IV surface")
-    st.caption(
-        "Within 2% of spot, average same-strike Call and Put IV when both are available. "
-        "Outside that band, prefer Put below spot and Call above spot."
-    )
     source = frame["source"]
     counts = (
         int(source.isin(["call", "put", "near_atm_average"]).sum()),
@@ -91,23 +94,27 @@ def main():
         ),
         int(source.eq("missing").sum()),
     )
-    for column, label, count in zip(
-        st.columns(3),
-        ["Preferred / averaged", "Fallback / one-sided", "Missing"],
-        counts,
-    ):
-        column.metric(label, f"{count:,}")
-    st.caption(f"Counts cover all {len(frame):,} expiry × strike grid cells.")
+    with st.sidebar.expander("Combined IV coverage"):
+        for label, count in zip(
+            ["Preferred / averaged", "Fallback / one-sided", "Missing"], counts
+        ):
+            st.metric(label, f"{count:,}")
+        st.caption(f"All {len(frame):,} expiry × strike grid cells.")
+        st.caption(
+            "Within 2% of spot, average same-strike Call and Put IV when both "
+            "are available. Outside that band, prefer Put below spot and Call "
+            "above spot."
+        )
     if not np.isfinite(frame["iv"]).any():
         st.warning("No IV solves succeeded at this rate. Try another rate assumption.")
 
-    range_name = st.radio(
+    st.sidebar.subheader("Surface views")
+    range_name = st.sidebar.radio(
         "Moneyness range",
         list(MONEYNESS_RANGES),
         horizontal=True,
         help=(
-            "Core keeps the denser center of the surface. Extended shows more "
-            "of the wings, where missing cells are expected."
+            "Applies to Heatmap and 3D surface. IV smiles show all observed strikes."
         ),
     )
     min_moneyness, max_moneyness = MONEYNESS_RANGES[range_name]
@@ -122,16 +129,14 @@ def main():
         np.isfinite(observed_frame["observed_iv"]), "Observed", "Missing"
     )
     surface_counts = surface_frame["surface_value_type"].value_counts()
-    st.caption(
+    surface_summary = (
         "Visible range: "
         f"{surface_counts.get('Observed', 0):,} observed · "
         f"{surface_counts.get('Interpolated', 0):,} interpolated · "
         f"{surface_counts.get('Missing', 0):,} blank. "
-        f"Displayed K / S: {min_moneyness:.1f}–{max_moneyness:.1f}. "
-        "2D linear total-variance interpolation across K / S and tau; "
-        "only inside the observed data boundary."
+        f"K / S: {min_moneyness:.1f}–{max_moneyness:.1f}."
     )
-    with st.expander("How the surface is filled"):
+    with st.sidebar.expander("Surface interpolation"):
         st.write(
             "Convert observed IV to total variance (IV² × tau), linearly "
             "interpolate it between observations, then convert back to IV. "
@@ -144,8 +149,14 @@ def main():
             "expiries, but cells outside that boundary stay blank. "
             "A denser grid would add display points, not market observations."
         )
+        st.write(
+            "In 3D, observed markers are lifted slightly above the mesh for "
+            "visibility; hover reports their original IV."
+        )
 
-    heatmap_tab, surface_tab = st.tabs(["Heatmap", "3D surface"])
+    heatmap_tab, surface_tab, smile_tab = st.tabs(
+        ["Heatmap", "3D surface", "IV smiles"]
+    )
     with heatmap_tab:
         heatmap_view = st.radio(
             "Heatmap values",
@@ -159,19 +170,60 @@ def main():
         heatmap_frame = (
             surface_frame if heatmap_view == "Surface" else observed_frame
         )
+        heatmap_counts = heatmap_frame["surface_value_type"].value_counts()
+        st.caption(
+            "Visible range: "
+            f"{heatmap_counts.get('Observed', 0):,} observed · "
+            f"{heatmap_counts.get('Interpolated', 0):,} interpolated · "
+            f"{heatmap_counts.get('Missing', 0):,} blank. "
+            f"K / S: {min_moneyness:.1f}–{max_moneyness:.1f}."
+        )
         st.plotly_chart(
             make_iv_heatmap(heatmap_frame, equal_expiry_spacing=True),
             use_container_width=True,
         )
     with surface_tab:
-        st.caption(
-            "Uses the same interpolated values as the Surface heatmap; tau remains "
-            "the numerical maturity axis. Observed markers are lifted slightly "
-            "above the mesh for visibility; hover reports their original IV."
-        )
+        st.caption(surface_summary)
+        st.caption("2D total-variance interpolation · observed IV overlaid as points.")
         st.plotly_chart(
-            make_iv_surface_figure(surface_frame), use_container_width=True
+            make_iv_surface_figure(surface_frame),
+            use_container_width=True,
+            config={"modeBarButtonsToRemove": ["resetCameraDefault3d"]},
         )
+        st.markdown(
+            '<div aria-hidden="true" style="height: 32px"></div>',
+            unsafe_allow_html=True,
+        )
+    with smile_tab:
+        expiry_labels = {
+            row.tau: row.expiry_datetime.strftime("%Y-%m-%d")
+            for row in frame[["tau", "expiry_datetime"]]
+            .dropna()
+            .drop_duplicates("tau")
+            .itertuples(index=False)
+        }
+        available_expiries = sorted(frame["tau"].unique())
+        finite_expiries = sorted(
+            frame.loc[np.isfinite(frame["iv"]), "tau"].unique()
+        )
+        with st.popover("Select expiries"):
+            st.caption("Expiry (UTC)")
+            selected_expiries = [
+                tau for tau in available_expiries
+                if st.checkbox(
+                    expiry_labels.get(tau, f"tau={tau:g}"),
+                    value=tau in finite_expiries[:3],
+                    key=f"smile_expiry_{tau}",
+                )
+            ]
+        st.caption("Observed Combined IV · all strikes · gaps preserved")
+        if selected_expiries:
+            st.plotly_chart(
+                make_smile_figure(frame, selected_expiries=selected_expiries),
+                use_container_width=True,
+            )
+        else:
+            st.info("Select an expiry to show its IV smile.")
 
 
 if __name__ == "__main__":
