@@ -67,6 +67,29 @@ def _spaced_tau_ticks(taus, minimum_spacing_fraction=0.08):
     return values[visible]
 
 
+def _maturity_hover(frame, taus):
+    """Format source expiry and frozen maturity consistently across charts."""
+    return [
+        f"Expiry (UTC): {label if not label.startswith('tau=') else 'Unavailable'}<br>"
+        f"Time to expiry: {float(tau) * 365.25:.2f} days<br>"
+        f"tau: {float(tau):.4f} years"
+        for tau, label in zip(taus, _expiry_labels(frame, taus))
+    ]
+
+
+def _surface_hover_text(
+    maturity, moneyness, strike, iv, *,
+    source_label=None, source=None, value_type=None,
+):
+    parts = [maturity, f"K / S: {moneyness:.4f}", f"strike: {strike:g}"]
+    if source_label is not None:
+        parts.append(f"{source_label}: {escape(str(source))}")
+    if value_type is not None:
+        parts.append(f"Surface value: {escape(str(value_type))}")
+    parts.append(f"IV: {iv:.2%}")
+    return "<br>".join(parts)
+
+
 def _heatmap_customdata(long_frame, iv_grid, strike_grid):
     customdata = strike_grid.to_numpy(dtype=float)
     strike_hover = "strike: %{customdata:g}<br>"
@@ -145,10 +168,9 @@ def make_iv_heatmap(
     y_values = expiry_labels if equal_expiry_spacing else iv_grid.index.to_numpy(
         dtype=float
     )
-    expiry_hover = (
-        "Expiry: %{y}<br>"
-        if equal_expiry_spacing
-        else "tau: %{y:.4f} years<br>"
+    maturity_text = np.repeat(
+        np.asarray(_maturity_hover(long_frame, iv_grid.index), dtype=object)[:, None],
+        len(iv_grid.columns), axis=1,
     )
 
     trace = go.Heatmap(
@@ -156,6 +178,7 @@ def make_iv_heatmap(
         y=y_values,
         z=iv_grid.to_numpy(dtype=float),
         customdata=customdata,
+        text=maturity_text,
         connectgaps=False,
         xgap=1,
         ygap=1,
@@ -166,8 +189,8 @@ def make_iv_heatmap(
             "xpad": 8,
         },
         hovertemplate=(
+            "%{text}<br>"
             "K / S: %{x:.4f}<br>"
-            + expiry_hover
             + strike_hover
             + source_hover
             + value_type_hover
@@ -178,7 +201,7 @@ def make_iv_heatmap(
     figure = go.Figure(data=[trace])
     figure.update_layout(
         xaxis_title="K / S",
-        yaxis_title="Expiry" if equal_expiry_spacing else "tau (years)",
+        yaxis_title="Expiry (UTC)" if equal_expiry_spacing else "tau (years)",
         plot_bgcolor="rgba(128, 128, 128, 0.18)",
         height=430,
         margin={"l": 12, "r": 12, "t": 24, "b": 12},
@@ -198,7 +221,9 @@ def make_iv_heatmap(
     return figure
 
 
-def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
+def make_iv_surface_figure(
+    long_frame: pd.DataFrame, *, compact_layout: bool = False
+) -> go.Figure:
     """Create a 3D IV surface from the same rectangular frame as the heatmap."""
     _require_columns(long_frame, _LONG_FRAME_COLUMNS, "long_frame")
 
@@ -214,7 +239,10 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
     customdata, strike_hover, source_hover, value_type_hover = (
         _heatmap_customdata(long_frame, iv_grid, strike_grid)
     )
-    visible_taus = _spaced_tau_ticks(iv_grid.index)
+    visible_taus = _spaced_tau_ticks(
+        iv_grid.index, minimum_spacing_fraction=0.30 if compact_layout else 0.18
+    )
+    maturity_text = _maturity_hover(long_frame, iv_grid.index)
     # Surface hover handles its native 2D text grid reliably. Keep customdata
     # for inspection, but avoid renderer-dependent compound-array indexing.
     hover_text = []
@@ -222,20 +250,19 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
         text_row = []
         for column_index, cell in enumerate(row):
             values = cell if customdata.ndim == 3 else [cell]
-            parts = [
-                f"K / S: {iv_grid.columns[column_index]:.4f}",
-                f"tau: {iv_grid.index[row_index]:.4f} years",
-                f"strike: {values[0]:g}",
-            ]
             field = 1
+            source_label = None
+            source = None
             if source_hover:
-                label = "Value source" if value_type_hover else "Combined source"
-                parts.append(f"{label}: {escape(str(values[field]))}")
+                source_label = "Value source" if value_type_hover else "Combined source"
+                source = values[field]
                 field += 1
-            if value_type_hover:
-                parts.append(f"Surface value: {escape(str(values[field]))}")
-            parts.append(f"IV: {iv_grid.iloc[row_index, column_index]:.2%}")
-            text_row.append("<br>".join(parts))
+            text_row.append(_surface_hover_text(
+                maturity_text[row_index], iv_grid.columns[column_index],
+                values[0], iv_grid.iloc[row_index, column_index],
+                source_label=source_label, source=source,
+                value_type=values[field] if value_type_hover else None,
+            ))
         hover_text.append(text_row)
     trace = go.Surface(
         x=iv_grid.columns.to_numpy(dtype=float),
@@ -245,6 +272,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
         # Plotly's text validator stringifies nested Python lists row-by-row;
         # a 2D object array retains the per-cell shape through serialization.
         text=np.asarray(hover_text, dtype=object),
+        hoverlabel={"align": "left"},
         connectgaps=False,
         colorscale="Viridis",
         colorbar={
@@ -285,24 +313,32 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
         observed_customdata = observed[
             ["strike", observed_column]
         ].to_numpy(dtype=float)
-        observed_strike_hover = "strike: %{customdata[0]:g}<br>"
-        observed_source_hover = ""
-        observed_iv_index = 1
         if "source" in observed.columns:
             observed_customdata = observed[
                 ["strike", "source", observed_column]
             ].to_numpy(dtype=object)
-            observed_strike_hover = "strike: %{customdata[0]:g}<br>"
-            observed_source_hover = (
-                "Combined source: %{customdata[1]}<br>"
+        observed_text = [
+            _surface_hover_text(
+                maturity, row.moneyness, row.strike, iv,
+                source_label=(
+                    "Value source" if value_type_hover else "Combined source"
+                ) if source_hover else None,
+                source=getattr(row, "source", "Observed IV"),
+                value_type="Observed" if value_type_hover else None,
             )
-            observed_iv_index = 2
+            for maturity, row, iv in zip(
+                _maturity_hover(observed, observed["tau"]),
+                observed.itertuples(index=False), original_observed_iv,
+            )
+        ]
         figure.add_trace(
             go.Scatter3d(
                 x=observed["moneyness"].to_numpy(dtype=float),
                 y=observed["tau"].to_numpy(dtype=float),
                 z=original_observed_iv + marker_lift,
                 customdata=observed_customdata,
+                text=observed_text,
+                hoverlabel={"align": "left"},
                 mode="markers",
                 name="Observed IV",
                 marker={
@@ -314,15 +350,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
                         "width": 0.4,
                     },
                 },
-                hovertemplate=(
-                    "Observed Combined IV<br>"
-                    "K / S: %{x:.4f}<br>"
-                    "tau: %{y:.4f} years<br>"
-                    + observed_strike_hover
-                    + observed_source_hover
-                    + f"IV: %{{customdata[{observed_iv_index}]:.2%}}"
-                    + "<extra></extra>"
-                ),
+                hoverinfo="text",
             )
         )
     axis_style = {
@@ -338,7 +366,10 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "bgcolor": "rgba(0, 0, 0, 0)",
             "xaxis": {"title": {"text": "K / S", "font": {"size": 12}}, **axis_style},
             "yaxis": {
-                "title": {"text": "Expiry", "font": {"size": 12}},
+                "title": {
+                    "text": "" if compact_layout else "Expiry (UTC)",
+                    "font": {"size": 12},
+                },
                 "tickmode": "array",
                 "tickvals": visible_taus,
                 "ticktext": [
@@ -355,7 +386,10 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
                 **axis_style,
             },
             "camera": {
-                "eye": {"x": 1.9, "y": 1.9, "z": 0.56},
+                "eye": (
+                    {"x": 2.7, "y": 2.7, "z": 0.796}
+                    if compact_layout else {"x": 1.9, "y": 1.9, "z": 0.56}
+                ),
                 "center": {"x": 0, "y": 0, "z": -0.06},
             },
             "aspectmode": "manual",
@@ -363,8 +397,13 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "dragmode": "turntable",
         },
         autosize=True,
-        height=640,
-        margin={"l": 20, "r": 12, "t": 24, "b": 24},
+        height=430 if compact_layout else 640,
+        margin={
+            "l": 40 if compact_layout else 20,
+            "r": 20 if compact_layout else 12,
+            "t": 24,
+            "b": 24,
+        },
         paper_bgcolor="rgba(0, 0, 0, 0)",
         legend={
             "orientation": "h",
@@ -374,7 +413,7 @@ def make_iv_surface_figure(long_frame: pd.DataFrame) -> go.Figure:
             "yanchor": "top",
             "bgcolor": "rgba(0, 0, 0, 0)",
         },
-        uirevision="iv-surface-camera-v15",
+        uirevision="iv-surface-camera-v18",
     )
     return figure
 
@@ -412,6 +451,7 @@ def make_smile_figure(
                 x=smile["moneyness"].to_numpy(dtype=float),
                 y=smile["iv"].to_numpy(dtype=float),
                 customdata=customdata,
+                text=[_maturity_hover(smile, [tau])[0]] * len(smile),
                 mode="lines+markers",
                 line=dict(width=2, color=colors[expiry_index % len(colors)]),
                 marker=dict(size=5),
@@ -419,7 +459,7 @@ def make_smile_figure(
                 meta=tau,
                 connectgaps=False,
                 hovertemplate=(
-                    "tau: %{meta:.4f} years<br>"
+                    "%{text}<br>"
                     "K / S: %{x:.4f}<br>"
                     + strike_hover
                     + source_hover
@@ -459,26 +499,35 @@ def make_atm_term_structure_figure(atm_frame: pd.DataFrame) -> go.Figure:
     trace = go.Scatter(
         x=data["tau"].to_numpy(dtype=float),
         y=data["iv"].to_numpy(dtype=float),
+        text=_maturity_hover(data, data["tau"]),
         customdata=customdata,
         mode="lines+markers",
         connectgaps=False,
         hovertemplate=(
-            "tau: %{x:.4f} years<br>"
+            "%{text}<br>"
             "IV: %{y:.2%}<br>"
-            "strike: %{customdata[0]}<br>"
-            "K / S: %{customdata[1]}<br>"
-            "ATM distance: %{customdata[2]}<br>"
+            "strike: %{customdata[0]:g}<br>"
+            "K / S: %{customdata[1]:.4f}<br>"
+            "ATM distance: %{customdata[2]:.2%}<br>"
             "selection: %{customdata[3]}<extra></extra>"
         ),
     )
     figure = go.Figure(data=[trace])
     figure.update_layout(
-        xaxis_title="tau (years)", yaxis_title="implied volatility"
+        height=430,
+        margin=dict(l=12, r=12, t=24, b=12),
+        xaxis_title=(
+            "Expiry (UTC) · spaced by maturity"
+            if "expiry_datetime" in data.columns else "tau (years)"
+        ),
+        yaxis_title="IV",
     )
+    ticks = _spaced_tau_ticks(data["tau"], minimum_spacing_fraction=0.18)
     figure.update_xaxes(
         tickmode="array",
-        tickvals=data["tau"].to_numpy(dtype=float),
-        ticktext=_expiry_labels(data, data["tau"]),
+        tickvals=ticks,
+        ticktext=_expiry_labels(data, ticks),
+        automargin=True,
     )
     figure.update_yaxes(tickformat=".0%")
     return figure

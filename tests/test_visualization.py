@@ -464,7 +464,7 @@ def test_surface_heatmap_uses_equal_expiry_rows_and_value_type_hover():
     figure = make_iv_heatmap(frame, equal_expiry_spacing=True)
     trace = figure.data[0]
     assert list(trace.y) == ["2026-06-01", "2026-09-01"]
-    assert figure.layout.yaxis.title.text == "Expiry"
+    assert figure.layout.yaxis.title.text == "Expiry (UTC)"
     assert figure.layout.yaxis.type == "category"
     assert list(figure.layout.yaxis.categoryarray) == [
         "2026-06-01", "2026-09-01"
@@ -507,6 +507,11 @@ def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
     )
     heatmap = make_iv_heatmap(frame, equal_expiry_spacing=True).data[0]
     surface = make_iv_surface_figure(frame)
+    compact = make_iv_surface_figure(frame, compact_layout=True)
+    np.testing.assert_allclose(compact.data[0].z, surface.data[0].z, equal_nan=True)
+    np.testing.assert_array_equal(compact.data[0].y, surface.data[0].y)
+    np.testing.assert_array_equal(compact.data[0].text, surface.data[0].text)
+    assert compact.layout.height < surface.layout.height
     trace = surface.data[0]
     observed = surface.data[1]
 
@@ -540,8 +545,9 @@ def test_3d_surface_uses_same_values_and_true_tau_axis_as_heatmap():
     )
     assert observed.marker.size == 3
     assert observed.marker.color == "#F97316"
-    assert "Observed Combined IV" in observed.hovertemplate
-    assert "customdata[1]" in observed.hovertemplate
+    assert observed.hovertemplate is None
+    assert observed.hoverinfo == "text"
+    assert "Surface value: Observed" in observed.text[0]
 
 
 def test_surface_hover_text_is_aligned_on_a_nonsquare_grid():
@@ -636,7 +642,8 @@ def test_make_atm_term_structure_figure_keeps_gap_and_hover_fields():
     assert np.isnan(trace.y).all()
     assert trace.connectgaps is False
     assert np.asarray(trace.customdata).shape == (2, 4)
-    for label in ["tau", "IV", "strike", "K / S", "ATM distance", "selection"]:
+    assert "tau: 0.2500 years" in trace.text[0]
+    for label in ["IV", "strike", "K / S", "ATM distance", "selection"]:
         assert label in trace.hovertemplate
     assert figure.layout.yaxis.tickformat == ".0%"
 
@@ -664,7 +671,7 @@ def test_figures_use_date_labels_and_tau_fallback_without_moving_coordinates():
         "2026-07-01",
     ]
     assert [trace.meta for trace in smiles.data] == [0.25, 0.5]
-    assert all("tau:" in trace.hovertemplate for trace in smiles.data)
+    assert all("tau:" in trace.text[0] for trace in smiles.data)
     assert all(trace.connectgaps is False for trace in smiles.data)
 
     selected = make_smile_figure(long_frame, selected_expiries=[0.5])
@@ -681,3 +688,52 @@ def test_figures_use_date_labels_and_tau_fallback_without_moving_coordinates():
     assert list(atm.layout.xaxis.ticktext) == ["tau=0.25", "2026-07-01"]
     assert np.isnan(atm_trace.y).all()
     assert atm_trace.connectgaps is False
+
+
+def test_all_views_share_source_expiry_and_frozen_maturity_hover():
+    frame = surface_to_long_frame(
+        [[.21, .22, np.nan], [.31, .32, .33]],
+        [.5, .25], [90, 100, 110], 100,
+        expiry_datetimes=['2027-03-26T01:00:00-07:00', None],
+    ).sample(frac=1, random_state=7)
+    expected = [
+        'Expiry (UTC): Unavailable<br>Time to expiry: 91.31 days<br>tau: 0.2500 years',
+        'Expiry (UTC): 2027-03-26<br>Time to expiry: 182.62 days<br>tau: 0.5000 years',
+    ]
+    for categorical in [False, True]:
+        trace = make_iv_heatmap(frame, equal_expiry_spacing=categorical).data[0]
+        assert np.asarray(trace.text).shape == (2, 3)
+        assert trace.text[:, 0].tolist() == expected
+        assert '%{text}' in trace.hovertemplate
+    surface = make_iv_surface_figure(frame)
+    for index, maturity in enumerate(expected):
+        assert all(text.startswith(maturity + '<br>') for text in surface.data[0].text[index])
+    points = frame.loc[np.isfinite(frame['iv'])]
+    assert all(
+        text.startswith(expected[int(tau == .5)] + '<br>')
+        for text, tau in zip(surface.data[1].text, points['tau'])
+    )
+    for trace, maturity in zip(make_smile_figure(frame).data, expected):
+        assert list(trace.text) == [maturity] * 3
+    atm = make_atm_term_structure_figure(atm_term_structure_frame(frame)).data[0]
+    assert list(atm.text) == expected
+    assert list(atm.x) == [.25, .5]
+
+
+def test_surface_mesh_and_observed_markers_share_identical_hover_for_same_quote():
+    frame = interpolate_smiles_1d(surface_to_long_frame(
+        [[.30, np.nan, .50], [.25, .35, .45]],
+        [.25, .5], [90, 100, 110], 100,
+        expiry_datetimes=['2026-06-01', '2026-09-01'],
+        source_grid=[['put', 'missing', 'call'], ['put', 'near_atm_average', 'call']],
+    )).sample(frac=1, random_state=6)
+    surface, markers = make_iv_surface_figure(frame).data
+    taus, moneyness = list(surface.y), list(surface.x)
+    for x, tau, text, lifted_iv, custom in zip(
+        markers.x, markers.y, markers.text, markers.z, markers.customdata,
+    ):
+        assert text == surface.text[taus.index(tau)][moneyness.index(x)]
+        assert f'IV: {float(custom[2]):.2%}' in text
+        assert lifted_iv > float(custom[2])
+    assert 'Surface value: Interpolated' in surface.text[0][1]
+    assert 'Value source: 1D interpolation within expiry' in surface.text[0][1]

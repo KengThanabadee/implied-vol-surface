@@ -75,8 +75,17 @@ pip install -e ".[dashboard]"
 python -m streamlit run app.py
 ```
 
-The dashboard shows the Combined IV heatmap and 3D surface from the checked-in
-Bybit BTC snapshot. Its default `0.80 <= K / S <= 1.20` surface fills missing
+The dashboard shows a Combined IV heatmap, 3D surface, IV smiles, and ATM term
+structure from the checked-in Bybit BTC snapshot. IV smiles use original observed
+values across all strikes, with an independent expiry checklist. The ATM view
+uses every expiry and selects the nearest finite Combined IV within 2% of spot,
+averaging equally near strikes. Expiries without an eligible proxy remain gaps;
+selection details show their status. Numerical maturity (`tau`) controls spacing.
+All chart tooltips show source expiry dates in UTC, time to expiry in days
+(`tau × 365.25`), and `tau` in years, using the frozen snapshot time. The 3D
+view switches to a compact layout when its available width is below 700px.
+
+The default `0.80 <= K / S <= 1.20` surface fills missing
 grid cells with 2D piecewise-linear total-variance interpolation. It converts
 observed IV to `w = IV² × tau`, interpolates across spot moneyness and numerical
 `tau`, then converts back with `IV = sqrt(w / tau)`. Both axes are scaled to

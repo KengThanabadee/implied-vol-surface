@@ -38,10 +38,10 @@ def test_dashboard_renders_grid_and_recalculates_rate(monkeypatch):
     counts = [int(metric.value.replace(",", "")) for metric in app.metric]
     assert sum(counts) == result.iv_surface.size
     assert counts[2] == np.isnan(result.iv_surface).sum()
-    assert len(app.get("plotly_chart")) == 3
+    assert len(app.get("plotly_chart")) == 5
     assert app.sidebar.radio[0].value == "Core (0.8–1.2)"
     assert app.main.radio[0].value == "Surface"
-    assert [tab.label for tab in app.tabs] == ["Heatmap", "3D surface", "IV smiles"]
+    assert [tab.label for tab in app.tabs] == ["Heatmap", "3D surface", "IV smiles", "ATM term structure"]
     assert any(
         "211 observed · 163 interpolated · 26 blank" in caption.value
         for caption in app.caption
@@ -136,7 +136,7 @@ def test_smile_selection_preserves_observations_and_other_views(monkeypatch):
         box.uncheck()
     app.run()
     assert not app.exception
-    assert len(app.get("plotly_chart")) == 2
+    assert len(app.get("plotly_chart")) == 4
     assert any("Select an expiry" in info.value for info in app.info)
 
 
@@ -161,7 +161,7 @@ def test_smile_defaults_skip_expiries_without_finite_iv(monkeypatch, finite_coun
     app = AppTest.from_file(str(APP_PATH), default_timeout=30).run()
     assert not app.exception
     assert [tau for tau, box in zip(ordered_expiries, app.checkbox) if box.value] == expected
-    assert len(app.get("plotly_chart")) == (3 if finite_count else 2)
+    assert len(app.get("plotly_chart")) == (5 if finite_count else 4)
 
 
 @pytest.mark.parametrize("case", ["file", "schema", "ticker", "quotes"])
@@ -190,3 +190,64 @@ def test_dashboard_input_errors_are_visible(monkeypatch, case):
     assert not app.exception
     assert len(app.error) == 1
     assert not app.get("plotly_chart")
+
+
+def test_atm_uses_raw_all_expiries_independent_of_view_controls(monkeypatch):
+    from iv_surface.surface_transforms import atm_term_structure_frame, surface_to_long_frame
+
+    figures = []
+    build_figure = visualization.make_atm_term_structure_figure
+
+    def record(frame):
+        figure = build_figure(frame)
+        figures.append(figure)
+        return figure
+
+    monkeypatch.setattr(visualization, "make_atm_term_structure_figure", record)
+    snapshot = fetcher.load_chain_snapshot(APP_PATH.parent / "data/bybit_btc_options_snapshot.json")
+    chain = fetcher.parse_chain_snapshot(snapshot)
+    result = surface_builder.build_combined_surface_from_chain(chain)
+    expected = atm_term_structure_frame(surface_to_long_frame(
+        result.iv_surface, result.expiries, result.strikes, result.spot_price,
+    ))
+    app = AppTest.from_file(str(APP_PATH), default_timeout=30).run()
+    assert not app.exception
+    trace = figures[-1].data[0]
+    np.testing.assert_allclose(trace.x, expected["tau"])
+    np.testing.assert_allclose(trace.y, expected["iv"], equal_nan=True)
+    np.testing.assert_allclose(
+        np.asarray(trace.customdata)[:, :3].astype(float),
+        expected[["strike", "moneyness", "atm_distance"]].to_numpy(), equal_nan=True,
+    )
+    assert list(np.asarray(trace.customdata)[:, 3]) == expected["selection_status"].tolist()
+    assert trace.connectgaps is False
+    assert len(trace.x) == len(result.expiries)
+    before = figures[-1].to_json()
+    for box in app.checkbox:
+        box.uncheck()
+    app.sidebar.radio[0].set_value("Extended (0.7–1.3)")
+    app.main.radio[0].set_value("Observed").run()
+    assert not app.exception
+    assert figures[-1].to_json() == before
+    app.number_input[0].set_value(3).run()
+    assert not app.exception
+    assert not np.allclose(figures[-1].data[0].y, trace.y, equal_nan=True)
+
+
+def test_atm_rejected_expiries_remain_gaps_and_have_visible_status(monkeypatch):
+    build = surface_builder.build_combined_surface_from_chain
+
+    def sparse_result(chain, r=0):
+        result = build(chain, r=r)
+        # Retain only a wing quote in one expiry; other expiries have no IV.
+        result.iv_surface[:] = np.nan
+        result.iv_surface[0, 0] = 0.5
+        return result
+
+    monkeypatch.setattr(surface_builder, "build_combined_surface_from_chain", sparse_result)
+    app = AppTest.from_file(str(APP_PATH), default_timeout=30).run()
+    assert not app.exception
+    details = app.dataframe[0].value
+    assert details["iv"].isna().all()
+    assert set(details["selection_status"]) == {"outside_bound", "no_finite_iv"}
+    assert any("remain gaps" in item.value for item in app.info)

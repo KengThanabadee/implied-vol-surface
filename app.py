@@ -9,10 +9,12 @@ import streamlit as st
 from iv_surface.fetcher import load_chain_snapshot, parse_chain_snapshot
 from iv_surface.surface_builder import build_combined_surface_from_chain
 from iv_surface.surface_transforms import (
+    atm_term_structure_frame,
     interpolate_surface_2d,
     surface_to_long_frame,
 )
 from iv_surface.visualization import (
+    make_atm_term_structure_figure,
     make_iv_heatmap,
     make_iv_surface_figure,
     make_smile_figure,
@@ -31,7 +33,15 @@ MONEYNESS_RANGES = {
 def main():
     st.set_page_config(page_title="BTC volatility", layout="wide")
     st.markdown(
-        "<style>.stMainBlockContainer {padding-top: 2rem; padding-bottom: 1rem;}</style>",
+        """<style>
+        .stMainBlockContainer {padding-top: 2rem; padding-bottom: 1rem;}
+        .st-key-surface-responsive {container-type: inline-size;}
+        .st-key-surface-narrow {display: none;}
+        @container (max-width: 699px) {
+            .st-key-surface-wide {display: none;}
+            .st-key-surface-narrow {display: block;}
+        }
+        </style>""",
         unsafe_allow_html=True,
     )
     st.title("BTC volatility")
@@ -154,8 +164,8 @@ def main():
             "visibility; hover reports their original IV."
         )
 
-    heatmap_tab, surface_tab, smile_tab = st.tabs(
-        ["Heatmap", "3D surface", "IV smiles"]
+    heatmap_tab, surface_tab, smile_tab, atm_tab = st.tabs(
+        ["Heatmap", "3D surface", "IV smiles", "ATM term structure"]
     )
     with heatmap_tab:
         heatmap_view = st.radio(
@@ -185,11 +195,15 @@ def main():
     with surface_tab:
         st.caption(surface_summary)
         st.caption("2D total-variance interpolation · observed IV overlaid as points.")
-        st.plotly_chart(
-            make_iv_surface_figure(surface_frame),
-            use_container_width=True,
-            config={"modeBarButtonsToRemove": ["resetCameraDefault3d"]},
-        )
+        with st.container(key="surface-responsive"):
+            for compact, key in [(False, "surface-wide"), (True, "surface-narrow")]:
+                with st.container(key=key):
+                    st.plotly_chart(
+                        make_iv_surface_figure(surface_frame, compact_layout=compact),
+                        key=f"plot-{key}",
+                        use_container_width=True,
+                        config={"modeBarButtonsToRemove": ["resetCameraDefault3d"]},
+                    )
         st.markdown(
             '<div aria-hidden="true" style="height: 32px"></div>',
             unsafe_allow_html=True,
@@ -224,6 +238,29 @@ def main():
             )
         else:
             st.info("Select an expiry to show its IV smile.")
+    with atm_tab:
+        atm_frame = atm_term_structure_frame(frame)
+        st.caption("Observed Combined IV nearest to spot within 2% · all expiries")
+        st.plotly_chart(
+            make_atm_term_structure_figure(atm_frame),
+            use_container_width=True,
+        )
+        rejected_count = int(atm_frame["iv"].isna().sum())
+        if rejected_count:
+            st.info(
+                f"{rejected_count} expiries have no usable ATM proxy and remain gaps. "
+                "See selection details below."
+            )
+        with st.expander("ATM selection details"):
+            st.caption(
+                "Choose the nearest finite Combined IV within 2% of spot. "
+                "Equally near strikes are averaged. Maturity spacing uses tau in years."
+            )
+            st.dataframe(
+                atm_frame.rename(columns={"expiry_datetime": "Expiry (UTC)"}),
+                hide_index=True,
+                use_container_width=True,
+            )
 
 
 if __name__ == "__main__":
