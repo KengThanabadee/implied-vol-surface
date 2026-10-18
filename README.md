@@ -21,6 +21,46 @@ This is an early local package in a personal quant-library ecosystem. It is usef
 - Converts usable option-chain mid prices into the expiry/strike grid used by the surface builder.
 - Combines aligned Call and Put surfaces with a spot-based, auditable selection rule.
 
+## Dashboard preview
+
+These charts come from the offline dashboard using the checked-in Deribit BTC
+snapshot captured on **2026-10-15 at 15:18:14 UTC**, with a **0.00%** risk-free
+rate. Open the [offline dashboard](#offline-dashboard) to explore the charts and
+their tooltips interactively.
+
+### Combined IV heatmap
+
+Color shows IV across spot moneyness (`K / S`) and expiry. This is Surface mode
+in the Core range (`0.8–1.2`): observed values are preserved, supported gaps are
+filled by 2D total-variance interpolation, and unsupported cells remain blank.
+Expiry rows have equal height and are ordered by maturity.
+
+![Combined IV heatmap across moneyness and UTC expiry, with an IV color scale.](docs/images/heatmap.jpg)
+
+### 3D surface
+
+The same interpolated values are shown in 3D, with numerical time to expiry
+controlling maturity spacing. Orange points show the original observed Combined
+IV; the surface is an interpolated display rather than an arbitrage-free fit.
+
+![3D Combined IV surface with observed quotes overlaid as orange points.](docs/images/surface.jpg)
+
+### IV smiles
+
+Compare observed Combined IV across strikes for selected expiries. The example
+uses the first three usable expiries; each curve retains its missing-value gaps
+and does not use the surface interpolation.
+
+![Observed IV smile curves for the first three usable Deribit expiries.](docs/images/iv-smiles.jpg)
+
+### ATM term structure
+
+Compare observed near-ATM IV across all expiries. Each expiry uses the nearest
+finite Combined IV within 2% of spot, averaging equally near strikes. Dates are
+spaced by numerical maturity; expiries without an eligible proxy remain gaps.
+
+![ATM IV term structure across UTC expiry dates, spaced by maturity.](docs/images/atm-term-structure.jpg)
+
 ## Module Boundaries
 
 - `iv_surface.fetcher` owns Bybit HTTP access, raw snapshot envelopes, and
