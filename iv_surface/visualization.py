@@ -77,11 +77,16 @@ def _maturity_hover(frame, taus):
     ]
 
 
+def _format_strike(strike):
+    """Keep fractional strikes while omitting unnecessary trailing zeros."""
+    return np.format_float_positional(float(strike), trim="-")
+
+
 def _surface_hover_text(
     maturity, moneyness, strike, iv, *,
     source_label=None, source=None, value_type=None,
 ):
-    parts = [maturity, f"K / S: {moneyness:.4f}", f"strike: {strike:g}"]
+    parts = [maturity, f"K / S: {moneyness:.4f}", f"strike: {_format_strike(strike)}"]
     if source_label is not None:
         parts.append(f"{source_label}: {escape(str(source))}")
     if value_type is not None:
@@ -92,7 +97,7 @@ def _surface_hover_text(
 
 def _heatmap_customdata(long_frame, iv_grid, strike_grid):
     customdata = strike_grid.to_numpy(dtype=float)
-    strike_hover = "strike: %{customdata:g}<br>"
+    strike_hover = "strike: %{hovertext}<br>"
     source_hover = ""
     value_type_hover = ""
 
@@ -134,7 +139,7 @@ def _heatmap_customdata(long_frame, iv_grid, strike_grid):
         combined[:, :, index] = values
 
     customdata = combined
-    strike_hover = "strike: %{customdata[0]:g}<br>"
+    strike_hover = "strike: %{hovertext}<br>"
     next_index = 1
     if has_source:
         source_label = "Value source" if has_value_type else "Combined source"
@@ -179,6 +184,10 @@ def make_iv_heatmap(
         z=iv_grid.to_numpy(dtype=float),
         customdata=customdata,
         text=maturity_text,
+        hovertext=np.asarray([
+            [_format_strike(strike) for strike in row]
+            for row in strike_grid.to_numpy(dtype=float)
+        ], dtype=object),
         connectgaps=False,
         xgap=1,
         ygap=1,
@@ -440,11 +449,10 @@ def make_smile_figure(
         )
         expiry_label = _expiry_labels(long_frame, [tau])[0]
         customdata = smile["strike"].to_numpy(dtype=float)
-        strike_hover = "strike: %{customdata:g}<br>"
+        strike_hover = "strike: %{hovertext}<br>"
         source_hover = ""
         if "source" in smile.columns:
             customdata = smile[["strike", "source"]].to_numpy(dtype=object)
-            strike_hover = "strike: %{customdata[0]:g}<br>"
             source_hover = "source: %{customdata[1]}<br>"
         figure.add_trace(
             go.Scatter(
@@ -452,6 +460,7 @@ def make_smile_figure(
                 y=smile["iv"].to_numpy(dtype=float),
                 customdata=customdata,
                 text=[_maturity_hover(smile, [tau])[0]] * len(smile),
+                hovertext=[_format_strike(strike) for strike in smile["strike"]],
                 mode="lines+markers",
                 line=dict(width=2, color=colors[expiry_index % len(colors)]),
                 marker=dict(size=5),
@@ -500,13 +509,14 @@ def make_atm_term_structure_figure(atm_frame: pd.DataFrame) -> go.Figure:
         x=data["tau"].to_numpy(dtype=float),
         y=data["iv"].to_numpy(dtype=float),
         text=_maturity_hover(data, data["tau"]),
+        hovertext=[_format_strike(strike) for strike in data["strike"]],
         customdata=customdata,
         mode="lines+markers",
         connectgaps=False,
         hovertemplate=(
             "%{text}<br>"
             "IV: %{y:.2%}<br>"
-            "strike: %{customdata[0]:g}<br>"
+            "strike: %{hovertext}<br>"
             "K / S: %{customdata[1]:.4f}<br>"
             "ATM distance: %{customdata[2]:.2%}<br>"
             "selection: %{customdata[3]}<extra></extra>"

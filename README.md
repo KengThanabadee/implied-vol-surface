@@ -2,7 +2,7 @@
 
 A small personal quant library for learning and building implied-volatility tooling from first principles.
 
-`implied-vol-surface` provides Black-Scholes pricing helpers, implied-volatility root finding, simple surface construction, bilinear interpolation, and basic Bybit option-chain fetching.
+`implied-vol-surface` provides Black-Scholes pricing helpers, implied-volatility root finding, surface construction, interpolation, and Deribit/Bybit option-chain inputs.
 
 The implied-volatility root-finding logic is implemented without `scipy.optimize`.
 
@@ -17,6 +17,7 @@ This is an early local package in a personal quant-library ecosystem. It is usef
 - Builds a 2D IV surface from a grid of option prices.
 - Interpolates IV inside an expiry/strike grid with bilinear interpolation.
 - Fetches and parses Bybit option-chain ticker data into a DataFrame, keeping market quotes separate from exchange mark values.
+- Adapts Deribit BTC inverse-option snapshots to USD premiums using a captured BTC/USD index.
 - Converts usable option-chain mid prices into the expiry/strike grid used by the surface builder.
 - Combines aligned Call and Put surfaces with a spot-based, auditable selection rule.
 
@@ -24,6 +25,8 @@ This is an early local package in a personal quant-library ecosystem. It is usef
 
 - `iv_surface.fetcher` owns Bybit HTTP access, raw snapshot envelopes, and
   parsing exchange responses into the canonical option-chain DataFrame.
+- `iv_surface.deribit` validates frozen BTC inverse-option snapshots and adapts
+  their metadata, BTC quotes and index to the same chain model.
 - `iv_surface.surface_builder` converts that canonical chain into option-price
   grids and side-specific or Combined IV surfaces.
 - `iv_surface.solver` owns Black-Scholes pricing, IV root finding, grid solving,
@@ -75,8 +78,13 @@ pip install -e ".[dashboard]"
 python -m streamlit run app.py
 ```
 
+The dashboard defaults to the checked-in Deribit BTC snapshot. The sidebar
+**Data source** selector also opens the original Bybit snapshot. Both run offline;
+the header identifies the selected exchange and capture time. Switching sources
+resets the smile expiry checklist to the first three usable expiries.
+
 The dashboard shows a Combined IV heatmap, 3D surface, IV smiles, and ATM term
-structure from the checked-in Bybit BTC snapshot. IV smiles use original observed
+structure. IV smiles use original observed
 values across all strikes, with an independent expiry checklist. The ATM view
 uses every expiry and selects the nearest finite Combined IV within 2% of spot,
 averaging equally near strikes. Expiries without an eligible proxy remain gaps;
@@ -102,6 +110,36 @@ Fewer than three non-collinear observations leave missing cells unfilled.
 This fills the existing grid rather than adding dense display points.
 The sidebar rate is in percent per year, continuously
 compounded; changing it recomputes IV from the same frozen bid/ask quotes.
+
+### Deribit input
+
+`data/deribit_btc_options_snapshot.json` preserves the raw responses from
+[`public/get_instruments`](https://docs.deribit.com/api-reference/market-data/public-get_instruments),
+[`public/get_book_summary_by_currency`](https://docs.deribit.com/api-reference/market-data/public-get_book_summary_by_currency),
+and [`public/get_index_price`](https://docs.deribit.com/api-reference/market-data/public-get_index_price).
+The version-1 envelope records `exchange: deribit`, `currency: BTC`, `base_url`,
+UTC capture start/end and a `requests` list containing each endpoint, parameters,
+UTC receive time and unchanged JSON-RPC response. The requests are sequential,
+so the envelope records a capture interval rather than an atomic exchange snapshot.
+Recurring historical collection belongs to the separate collector project.
+
+The adapter accepts BTC inverse options with one-BTC contract size. Instrument
+metadata supplies strike, option type and expiration timestamp. It retains
+instruments with missing books as missing quotes and rejects ambiguous identities
+or unsupported currencies. A valid mid requires positive, finite, uncrossed
+bid and ask; mark and exchange-provided mid values never fill absent quotes.
+
+[BTC inverse-option premiums are quoted in BTC](https://support.deribit.com/hc/en-us/articles/31424939096093-Inverse-Options).
+The adapter multiplies bid/ask premiums by the captured BTC/USD index to obtain
+USD per BTC, retaining BTC fields as `bid_price_btc`, `ask_price_btc`,
+`mid_price_btc` and `mark_price_btc`. That same index is the shared spot.
+Source expiry timestamps and the frozen capture end determine `tau` on the
+365.25-day basis. `mark_iv` is normalized from percent to decimal.
+
+Computed IV uses this repository's spot Black-Scholes solver and selected rate.
+Deribit's expiry-specific `underlying_price` is retained as comparison metadata;
+it is not substituted for spot. Computed IV therefore need not equal exchange
+mark IV. Combined-IV, interpolation and ATM selection rules are shared with Bybit.
 
 ## Quick Example
 

@@ -216,7 +216,7 @@ def test_chart_sources_follow_sorted_cells_and_selected_expiry():
     assert smile.y[1:].tolist() == [0.22, 0.2]
     for trace in [heatmap, smile]:
         assert "source: %{customdata[1]}" in trace.hovertemplate
-        assert "strike: %{customdata[0]:g}" in trace.hovertemplate
+        assert "strike: %{hovertext}" in trace.hovertemplate
         assert trace.connectgaps is False
     for figure in [make_iv_heatmap(_long_frame()), make_smile_figure(_long_frame())]:
         assert all("source:" not in trace.hovertemplate for trace in figure.data)
@@ -737,3 +737,46 @@ def test_surface_mesh_and_observed_markers_share_identical_hover_for_same_quote(
         assert lifted_iv > float(custom[2])
     assert 'Surface value: Interpolated' in surface.text[0][1]
     assert 'Value source: 1D interpolation within expiry' in surface.text[0][1]
+
+
+@pytest.mark.parametrize("with_source", [False, True])
+def test_all_chart_strike_labels_preserve_fractions_and_numeric_data(with_source):
+    frame = surface_to_long_frame(
+        [[.20, .21], [np.nan, .22]], [.25, .5], [82000, 82000.25], 82000,
+        source_grid=(
+            [["near_atm_average", "call"], ["missing", "call"]]
+            if with_source else None
+        ),
+    ).sample(frac=1, random_state=9)
+    original = frame.copy(deep=True)
+    labels = ["82000", "82000.25"]
+    heatmap = make_iv_heatmap(frame).data[0]
+    assert np.asarray(heatmap.hovertext).tolist() == [labels, labels]
+    assert json.loads(heatmap.to_json())["hovertext"] == [labels, labels]
+    strikes = np.asarray(heatmap.customdata)
+    if with_source:
+        strikes = strikes[:, :, 0]
+    np.testing.assert_array_equal(strikes.astype(float), [[82000, 82000.25]] * 2)
+    assert "strike: %{hovertext}" in heatmap.hovertemplate
+    for trace in make_smile_figure(frame).data:
+        assert list(trace.hovertext) == labels
+        assert "strike: %{hovertext}" in trace.hovertemplate
+        numeric = np.asarray(trace.customdata)
+        if with_source:
+            numeric = numeric[:, 0]
+        np.testing.assert_array_equal(numeric.astype(float), [82000, 82000.25])
+    surface, markers = make_iv_surface_figure(frame).data
+    for row in surface.text:
+        for label, text in zip(labels, row):
+            assert f"strike: {label}<br>" in text
+    for custom, text in zip(markers.customdata, markers.text):
+        label = labels[int(float(custom[0]) == 82000.25)]
+        assert f"strike: {label}<br>" in text
+    atm_frame = atm_term_structure_frame(frame)
+    atm = make_atm_term_structure_figure(atm_frame).data[0]
+    assert list(atm.hovertext) == labels
+    assert "strike: %{hovertext}" in atm.hovertemplate
+    np.testing.assert_array_equal(np.asarray(atm.customdata)[:, 0].astype(float),
+                                  [82000, 82000.25])
+    assert np.isnan(heatmap.z[1, 0])
+    pd.testing.assert_frame_equal(frame, original)

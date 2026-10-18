@@ -7,6 +7,7 @@ import numpy as np
 import streamlit as st
 
 from iv_surface.fetcher import load_chain_snapshot, parse_chain_snapshot
+from iv_surface.deribit import load_deribit_snapshot, parse_deribit_snapshot
 from iv_surface.surface_builder import build_combined_surface_from_chain
 from iv_surface.surface_transforms import (
     atm_term_structure_frame,
@@ -21,9 +22,11 @@ from iv_surface.visualization import (
 )
 
 
-SNAPSHOT_PATH = (
-    Path(__file__).resolve().parent / "data/bybit_btc_options_snapshot.json"
-)
+DATA_PATH = Path(__file__).resolve().parent / "data"
+SNAPSHOT_SOURCES = {
+    "Deribit": ("deribit_btc_options_snapshot.json", load_deribit_snapshot, parse_deribit_snapshot),
+    "Bybit": ("bybit_btc_options_snapshot.json", load_chain_snapshot, parse_chain_snapshot),
+}
 MONEYNESS_RANGES = {
     "Core (0.8–1.2)": (0.8, 1.2),
     "Extended (0.7–1.3)": (0.7, 1.3),
@@ -45,6 +48,7 @@ def main():
         unsafe_allow_html=True,
     )
     st.title("BTC volatility")
+    source_name = st.sidebar.selectbox("Data source", list(SNAPSHOT_SOURCES), key="data_source")
     rate_percent = st.sidebar.number_input(
         "Risk-free rate (% p.a., continuously compounded)",
         value=0.00,
@@ -57,10 +61,11 @@ def main():
 
     # Catch input errors at the loading boundary, not errors in chart rendering.
     try:
-        snapshot = load_chain_snapshot(SNAPSHOT_PATH)
-        chain = parse_chain_snapshot(snapshot)
+        filename, load_snapshot, parse_snapshot = SNAPSHOT_SOURCES[source_name]
+        snapshot = load_snapshot(DATA_PATH / filename)
+        chain = parse_snapshot(snapshot)
     except (OSError, ValueError, TypeError, RuntimeError, AttributeError):
-        st.error("Cannot read the frozen Bybit snapshot. Check its file and schema.")
+        st.error(f"Cannot read the frozen {source_name} snapshot. Check its file and schema.")
         return
 
     try:
@@ -84,7 +89,7 @@ def main():
     captured_at = datetime.fromisoformat(
         snapshot["captured_at_utc"].replace("Z", "+00:00")
     )
-    st.caption(f"Bybit BTC · Frozen snapshot: {captured_at:%Y-%m-%d %H:%M:%S} UTC")
+    st.caption(f"{source_name} BTC · Frozen snapshot: {captured_at:%Y-%m-%d %H:%M:%S} UTC")
     st.write(
         f"Shared spot: **${result.spot_price:,.2f}** · "
         f"Risk-free rate: **{rate_percent:.2f}% p.a.**, continuously compounded"
@@ -115,6 +120,13 @@ def main():
             "are available. Outside that band, prefer Put below spot and Call "
             "above spot."
         )
+    if source_name == "Deribit":
+        with st.sidebar.expander("Deribit pricing"):
+            st.caption(
+                "BTC bid/ask premiums are converted to USD using the snapshot's "
+                "BTC/USD index. IV uses our spot Black-Scholes model and the "
+                "selected rate; Deribit mark IV uses its own pricing inputs."
+            )
     if not np.isfinite(frame["iv"]).any():
         st.warning("No IV solves succeeded at this rate. Try another rate assumption.")
 
@@ -227,7 +239,7 @@ def main():
                 if st.checkbox(
                     expiry_labels.get(tau, f"tau={tau:g}"),
                     value=tau in finite_expiries[:3],
-                    key=f"smile_expiry_{tau}",
+                    key=f"smile_expiry_{source_name}_{snapshot['captured_at_utc']}_{tau}",
                 )
             ]
         st.caption("Observed Combined IV · all strikes · gaps preserved")
